@@ -33,6 +33,17 @@ public class TestCase implements Serializable {
      * high, medium, low
      */
     private String priority;
+    
+    /**
+     * Stores JSON for API case or Script text for Web/App
+     */
+    private String content;
+    
+    private String environment;
+    
+    private LocalDateTime lastRun;
+    
+    private String lastResult; // success, failed, pending
 
     @TableField("created_by")
     private Integer createdBy;

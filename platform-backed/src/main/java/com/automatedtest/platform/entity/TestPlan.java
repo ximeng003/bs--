@@ -27,8 +27,7 @@ public class TestPlan implements Serializable {
      */
     private String status;
 
-    @TableField("default_environment_id")
-    private Integer defaultEnvironmentId;
+    private String environment;
 
     @TableField(value = "created_at", fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

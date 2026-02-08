@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { Card, CardContent } from '@/components/ui/card'
 import Button from '@/components/ui/button/Button.vue'
@@ -16,6 +16,14 @@ const deviceType = ref('web')
 const isExecuting = ref(false)
 const executionLogs = ref<string[]>([])
 const scriptContent = ref('')
+const appiumConf = ref({
+    remoteUrl: 'http://127.0.0.1:4723',
+    platformName: 'Android',
+    automationName: 'UiAutomator2',
+    deviceName: 'emulator-5554',
+    appPackage: '',
+    appActivity: ''
+})
 
 const defaultScript = `// Web自动化测试脚本 - 关键字驱动
 // 支持自然语言编写测试步骤
@@ -89,7 +97,64 @@ const loadCase = async (id: string) => {
         if (res) {
             caseName.value = res.name
             deviceType.value = res.type === 'APP' ? 'app' : 'web'
-            scriptContent.value = res.content || (res.type === 'APP' ? appScript : defaultScript)
+            const raw = res.content || ''
+            const formatSelector = (s: any) => {
+                if (!s) {
+                    return ''
+                }
+                if (s.by === 'id') {
+                    return `resource-id=${s.value}`
+                }
+                if (s.by === 'accessibility_id') {
+                    return `accessibility-id=${s.value}`
+                }
+                if (s.by === 'xpath') {
+                    return `xpath=${s.value}`
+                }
+                return s.value || ''
+            }
+            try {
+                const obj = JSON.parse(raw)
+                if (obj.appium) {
+                    appiumConf.value = {
+                        remoteUrl: obj.appium.remoteUrl || obj.appium.remote_url || appiumConf.value.remoteUrl,
+                        platformName: obj.appium.capabilities?.platformName || appiumConf.value.platformName,
+                        automationName: obj.appium.capabilities?.automationName || appiumConf.value.automationName,
+                        deviceName: obj.appium.capabilities?.deviceName || appiumConf.value.deviceName,
+                        appPackage: obj.appium.capabilities?.appPackage || '',
+                        appActivity: obj.appium.capabilities?.appActivity || ''
+                    }
+                }
+                if (obj.script) {
+                    scriptContent.value = obj.script
+                } else if (Array.isArray(obj.steps)) {
+                    scriptContent.value = obj.steps.map((s: any) => {
+                        const a = (s.action || '').toLowerCase()
+                        if (a === 'click') {
+                            return `点击元素: ${formatSelector(s)}`
+                        } else if (a === 'input') {
+                            return `输入文本: ${formatSelector(s)}, ${s.text || ''}`
+                        } else if (a === 'wait') {
+                            return s.value ? `等待元素: ${formatSelector(s)}, ${s.ms || 1000}` : `等待时间: ${s.ms || 1000}`
+                        } else if (a === 'back') {
+                            return '后退'
+                        } else if (a === 'launch') {
+                            return '启动应用'
+                        } else if (a === 'close') {
+                            return '关闭应用'
+                        } else if (a === 'screenshot') {
+                            return `截图: ${s.path || s.file || s.name || 'screenshot.png'}`
+                        } else if (a === 'assert_exists') {
+                            return `断言元素存在: ${formatSelector(s)}`
+                        }
+                        return `未知动作: ${a}`
+                    }).join('\n')
+                } else {
+                    scriptContent.value = raw || (res.type === 'APP' ? appScript : defaultScript)
+                }
+            } catch {
+                scriptContent.value = raw || (res.type === 'APP' ? appScript : defaultScript)
+            }
         }
     } catch (e) {
         console.error('Failed to load case', e)
@@ -102,13 +167,96 @@ watch(deviceType, (newValue) => {
     }
 })
 
+const parseSelector = (raw: string) => {
+    const value = (raw || '').trim()
+    if (value.startsWith('resource-id=')) {
+        return { by: 'id', value: value.replace('resource-id=', '') }
+    }
+    if (value.startsWith('id=')) {
+        return { by: 'id', value: value.replace('id=', '') }
+    }
+    if (value.startsWith('accessibility-id=')) {
+        return { by: 'accessibility_id', value: value.replace('accessibility-id=', '') }
+    }
+    if (value.startsWith('xpath=')) {
+        return { by: 'xpath', value: value.replace('xpath=', '') }
+    }
+    if (value.startsWith('text=')) {
+        const textValue = value.replace('text=', '')
+        return { by: 'xpath', value: `//*[@text='${textValue}']` }
+    }
+    return { by: 'xpath', value }
+}
+
+const parseScriptToSteps = (text: string) => {
+    const lines = (text || '').split('\n').map(l => l.trim()).filter(Boolean)
+    const steps: any[] = []
+    for (const line of lines) {
+        if (line.startsWith('//') || line.startsWith('#')) {
+            continue
+        }
+        if (line.startsWith('点击元素:') || line.startsWith('点击按钮:')) {
+            const value = line.split(':')[1]?.trim() || ''
+            const selector = parseSelector(value)
+            steps.push({ action: 'click', ...selector })
+        } else if (line.startsWith('输入文本:')) {
+            const payload = line.split(':')[1] || ''
+            const parts = payload.split(',').map(p => p.trim())
+            const value = parts[0]
+            const textValue = parts[1] || ''
+            const selector = parseSelector(value)
+            steps.push({ action: 'input', ...selector, text: textValue, clear: true })
+        } else if (line.startsWith('等待元素:')) {
+            const payload = line.split(':')[1] || ''
+            const parts = payload.split(',').map(p => p.trim())
+            const value = parts[0]
+            const ms = parseInt(parts[1] || '1000')
+            const selector = parseSelector(value)
+            steps.push({ action: 'wait', ...selector, ms: isNaN(ms) ? 1000 : ms })
+        } else if (line.startsWith('等待时间:')) {
+            const msStr = line.split(':')[1] || '1000'
+            const ms = parseInt(msStr)
+            steps.push({ action: 'wait', ms: isNaN(ms) ? 1000 : ms })
+        } else if (line.startsWith('后退')) {
+            steps.push({ action: 'back' })
+        } else if (line.startsWith('启动应用')) {
+            steps.push({ action: 'launch' })
+        } else if (line.startsWith('关闭应用')) {
+            steps.push({ action: 'close' })
+        } else if (line.startsWith('断言元素存在:')) {
+            const value = line.split(':')[1]?.trim() || ''
+            const selector = parseSelector(value)
+            steps.push({ action: 'assert_exists', ...selector })
+        } else if (line.startsWith('截图:')) {
+            const value = line.split(':')[1]?.trim() || 'screenshot.png'
+            steps.push({ action: 'screenshot', path: value })
+        }
+    }
+    return steps
+}
+
 const handleSave = async () => {
     try {
+        const contentObj = deviceType.value === 'web'
+            ? { script: scriptContent.value }
+            : {
+                appium: {
+                    remoteUrl: appiumConf.value.remoteUrl,
+                    capabilities: {
+                        platformName: appiumConf.value.platformName,
+                        automationName: appiumConf.value.automationName,
+                        deviceName: appiumConf.value.deviceName,
+                        appPackage: appiumConf.value.appPackage,
+                        appActivity: appiumConf.value.appActivity
+                    }
+                },
+                steps: parseScriptToSteps(scriptContent.value)
+            }
         const payload = {
             id: caseId.value,
             name: caseName.value,
             type: deviceType.value.toUpperCase(),
-            content: scriptContent.value,
+            content: JSON.stringify(contentObj),
             // Add defaults if missing
             description: 'Updated from Script Editor',
             status: 'active'
@@ -125,7 +273,7 @@ const handleSave = async () => {
     }
 }
 
-const keywords = [
+const webKeywords = [
   { category: '导航操作', items: [
       { label: '打开URL', value: '打开URL: https://example.com' },
       { label: '刷新页面', value: '刷新页面' },
@@ -159,38 +307,47 @@ const keywords = [
   ]}
 ]
 
-const handleExecute = () => {
+const appKeywords = [
+  { category: '应用操作', items: [
+      { label: '启动应用', value: '启动应用' },
+      { label: '关闭应用', value: '关闭应用' },
+      { label: '后退', value: '后退' }
+  ]},
+  { category: '元素操作', items: [
+      { label: '点击元素', value: '点击元素: resource-id=login_btn' },
+      { label: '输入文本', value: '输入文本: resource-id=username, testuser' }
+  ]},
+  { category: '等待操作', items: [
+      { label: '等待元素', value: '等待元素: resource-id=home_page, 5000' },
+      { label: '等待时间', value: '等待时间: 1000' }
+  ]},
+  { category: '断言验证', items: [
+      { label: '断言元素存在', value: '断言元素存在: resource-id=user_profile' }
+  ]},
+  { category: '其他操作', items: [
+      { label: '截图', value: '截图: app_login_success.png' }
+  ]}
+]
+
+const keywordGroups = computed(() => deviceType.value === 'app' ? appKeywords : webKeywords)
+
+const handleExecute = async () => {
+  if (!caseId.value) {
+    alert('请先保存用例')
+    return
+  }
   isExecuting.value = true
   executionLogs.value = []
-  
-  const now = () => new Date().toLocaleTimeString('en-GB', { hour12: false }) // HH:mm:ss
-
-  const logs = [
-    `[${now()}] 开始执行测试用例: ` + caseName.value,
-    `[${now()}] 初始化测试引擎...`,
-    `[${now()}] ✓ 打开URL: https://example.com`,
-    `[${now()}] ✓ 等待元素: #login-form`,
-    `[${now()}] ✓ 输入文本: #username`,
-    `[${now()}] ✓ 输入文本: #password`,
-    `[${now()}] ✓ 点击元素: #login-button`,
-    `[${now()}] ✓ 等待元素: .dashboard`,
-    `[${now()}] ✓ 断言文本: .welcome-message`,
-    `[${now()}] ✓ 断言URL包含: /dashboard`,
-    `[${now()}] ✓ 截图: login_success.png`,
-    `[${now()}] ✓ 关闭浏览器`,
-    `[${now()}] 执行完成: 通过`
-  ]
-  
-  let i = 0
-  const interval = setInterval(() => {
-    if (i < logs.length) {
-      executionLogs.value.push(logs[i])
-      i++
-    } else {
-      clearInterval(interval)
-      isExecuting.value = false
-    }
-  }, 500)
+  try {
+    const res: any = await request.post(`/testcases/${caseId.value}/execute`)
+    const logs = res?.logs ? String(res.logs).split('\n') : []
+    executionLogs.value = logs.length ? logs : ['执行完成']
+    alert(res?.status === 'success' ? '执行成功' : (res?.error || '执行失败'))
+  } catch (e: any) {
+    alert(e?.message || '执行失败')
+  } finally {
+    isExecuting.value = false
+  }
 }
 
 const handleCopyCode = () => {
@@ -239,7 +396,7 @@ const handleCopyCode = () => {
       <!-- Keywords Sidebar -->
       <Card class="w-64 flex-none overflow-y-auto">
         <CardContent class="p-4 space-y-6">
-          <div v-for="group in keywords" :key="group.category" class="space-y-2">
+          <div v-for="group in keywordGroups" :key="group.category" class="space-y-2">
             <h3 class="font-semibold text-sm text-gray-900 flex items-center gap-2">
               <Code class="w-4 h-4 text-gray-500" />
               {{ group.category }}
@@ -260,6 +417,34 @@ const handleCopyCode = () => {
 
       <!-- Main Editor Area -->
       <div class="flex-1 flex flex-col gap-4 min-w-0">
+        <Card v-if="deviceType === 'app'" class="flex-none">
+          <CardContent class="p-4 grid grid-cols-2 gap-4">
+            <div class="space-y-1">
+              <div class="text-xs text-gray-500">Appium 地址</div>
+              <Input v-model="appiumConf.remoteUrl" />
+            </div>
+            <div class="space-y-1">
+              <div class="text-xs text-gray-500">platformName</div>
+              <Input v-model="appiumConf.platformName" />
+            </div>
+            <div class="space-y-1">
+              <div class="text-xs text-gray-500">automationName</div>
+              <Input v-model="appiumConf.automationName" />
+            </div>
+            <div class="space-y-1">
+              <div class="text-xs text-gray-500">deviceName</div>
+              <Input v-model="appiumConf.deviceName" />
+            </div>
+            <div class="space-y-1">
+              <div class="text-xs text-gray-500">appPackage</div>
+              <Input v-model="appiumConf.appPackage" />
+            </div>
+            <div class="space-y-1">
+              <div class="text-xs text-gray-500">appActivity</div>
+              <Input v-model="appiumConf.appActivity" />
+            </div>
+          </CardContent>
+        </Card>
         <!-- Script Editor -->
         <Card class="flex-1 flex flex-col min-h-0">
           <div class="flex items-center justify-between px-4 py-2 border-b border-gray-100">

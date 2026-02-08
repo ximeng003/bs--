@@ -3,6 +3,7 @@ package com.automatedtest.platform.controller;
 import com.automatedtest.platform.common.Result;
 import com.automatedtest.platform.dto.ApiTestRequestDTO;
 import com.automatedtest.platform.dto.ApiTestResponseDTO;
+import com.automatedtest.platform.dto.CaseExecuteResultDTO;
 import com.automatedtest.platform.entity.TestCase;
 import com.automatedtest.platform.service.TestCaseService;
 import com.baomidou.mybatisplus.core.metadata.IPage;
@@ -20,6 +21,11 @@ public class TestCaseController {
     @PostMapping("/execute")
     public Result<ApiTestResponseDTO> execute(@RequestBody ApiTestRequestDTO request) {
         return Result.success(testCaseService.executeApiTest(request));
+    }
+    
+    @PostMapping("/{id}/execute")
+    public Result<CaseExecuteResultDTO> executeById(@PathVariable Integer id) {
+        return Result.success(testCaseService.executeCaseById(id));
     }
 
     @GetMapping

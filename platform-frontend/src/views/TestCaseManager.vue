@@ -70,10 +70,17 @@ const handleDelete = async (id: string) => {
 }
 
 const handleRun = async (id: string) => {
-    // In a real app, this would trigger an async job
-    // For now, we simulate success
-    alert('开始执行用例 ' + id)
-    // You might call an endpoint here: await request.post(`/testcases/${id}/execute`)
+    try {
+        const res: any = await request.post(`/testcases/${id}/execute`)
+        await fetchTestCases()
+        if (res?.status === 'success') {
+            alert('执行成功')
+        } else {
+            alert(res?.error || '执行失败')
+        }
+    } catch (e: any) {
+        alert(e?.message || '执行失败')
+    }
 }
 
 const navigateToEditor = (id: string, type: string) => {

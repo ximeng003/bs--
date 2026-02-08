@@ -11,7 +11,8 @@ import {
   TitleComponent
 } from 'echarts/components'
 import VChart from 'vue-echarts'
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
+import request from '@/api/request'
 
 use([
   CanvasRenderer,
@@ -24,48 +25,42 @@ use([
 ])
 
 // Statistics data
-const stats = [
+const stats = ref([
   {
     title: '总用例数',
-    value: '1,246',
-    change: '+12.5%',
+    value: '0',
+    change: '-',
     icon: TrendingUp,
     color: 'bg-blue-500',
     textColor: 'text-blue-600'
   },
   {
     title: '通过用例',
-    value: '1,108',
-    change: '+8.2%',
+    value: '0',
+    change: '-',
     icon: CheckCircle,
     color: 'bg-green-500',
     textColor: 'text-green-600'
   },
   {
     title: '失败用例',
-    value: '138',
-    change: '-3.1%',
+    value: '0',
+    change: '-',
     icon: XCircle,
     color: 'bg-red-500',
     textColor: 'text-red-600'
   },
   {
     title: '平均耗时',
-    value: '2.8s',
-    change: '-15.3%',
+    value: '0s',
+    change: '-',
     icon: Clock,
     color: 'bg-yellow-500',
     textColor: 'text-yellow-600'
   }
-]
+])
 
-// Donut chart data
-const donutData = [
-  { name: '通过', value: 1108, color: '#67C23A' },
-  { name: '失败', value: 138, color: '#F56C6C' }
-]
-
-const pieOption = ref({
+const pieOption = ref<any>({
   tooltip: {
     trigger: 'item'
   },
@@ -94,27 +89,12 @@ const pieOption = ref({
       labelLine: {
         show: false
       },
-      data: donutData.map(item => ({
-        value: item.value,
-        name: item.name,
-        itemStyle: { color: item.color }
-      }))
+      data: []
     }
   ]
 })
 
-// Bar chart data
-const barData = [
-  { date: '01-27', passed: 145, failed: 12 },
-  { date: '01-28', passed: 158, failed: 15 },
-  { date: '01-29', passed: 162, failed: 10 },
-  { date: '01-30', passed: 148, failed: 18 },
-  { date: '01-31', passed: 172, failed: 14 },
-  { date: '02-01', passed: 165, failed: 11 },
-  { date: '02-02', passed: 158, failed: 16 }
-]
-
-const barOption = ref({
+const barOption = ref<any>({
   tooltip: {
     trigger: 'axis',
     axisPointer: {
@@ -130,7 +110,7 @@ const barOption = ref({
   },
   xAxis: {
     type: 'category',
-    data: barData.map(d => d.date)
+    data: []
   },
   yAxis: {
     type: 'value'
@@ -139,14 +119,14 @@ const barOption = ref({
     {
       name: '通过',
       type: 'bar',
-      data: barData.map(d => d.passed),
+      data: [],
       itemStyle: { color: '#67C23A' },
       barMaxWidth: 40
     },
     {
       name: '失败',
       type: 'bar',
-      data: barData.map(d => d.failed),
+      data: [],
       itemStyle: { color: '#F56C6C' },
       barMaxWidth: 40
     }
@@ -154,14 +134,83 @@ const barOption = ref({
 })
 
 // Recent activities
-const recentActivities = [
-  { id: 1, type: 'success', case: '用户登录API测试', time: '5分钟前', executor: '张三' },
-  { id: 2, type: 'failed', case: 'Web支付流程测试', time: '15分钟前', executor: '李四' },
-  { id: 3, type: 'success', case: 'APP首页加载测试', time: '30分钟前', executor: '王五' },
-  { id: 4, type: 'success', case: '数据查询接口测试', time: '1小时前', executor: '赵六' },
-  { id: 5, type: 'success', case: 'Web表单提交测试', time: '2小时前', executor: '张三' },
-  { id: 6, type: 'failed', case: 'APP推送功能测试', time: '3小时前', executor: '李四' }
-]
+const recentActivities = ref<any[]>([])
+
+const fetchData = async () => {
+  try {
+    const res: any = await request.get('/dashboard/stats')
+    
+    // Update Stats
+    stats.value[0].value = res.totalCases.toString()
+    stats.value[1].value = res.passedCases.toString()
+    stats.value[2].value = res.failedCases.toString()
+    stats.value[3].value = res.avgDuration + 's'
+    
+    // Update Donut Chart
+    const donutData = [
+      { name: '通过', value: res.passedCases, color: '#67C23A' },
+      { name: '失败', value: res.failedCases, color: '#F56C6C' }
+    ]
+    
+    pieOption.value = {
+      ...pieOption.value,
+      series: [{
+        ...pieOption.value.series[0],
+        data: donutData.map(item => ({
+          value: item.value,
+          name: item.name,
+          itemStyle: { color: item.color }
+        }))
+      }]
+    }
+    
+    // Update Bar Chart
+    const dates = res.dailyTrend.map((d: any) => d.date)
+    const passed = res.dailyTrend.map((d: any) => d.passed)
+    const failed = res.dailyTrend.map((d: any) => d.failed)
+    
+    barOption.value = {
+      ...barOption.value,
+      xAxis: {
+        type: 'category',
+        data: dates
+      },
+      series: [
+        {
+          name: '通过',
+          type: 'bar',
+          data: passed,
+          itemStyle: { color: '#67C23A' },
+          barMaxWidth: 40
+        },
+        {
+          name: '失败',
+          type: 'bar',
+          data: failed,
+          itemStyle: { color: '#F56C6C' },
+          barMaxWidth: 40
+        }
+      ]
+    }
+    
+    // Update Recent Activities
+    recentActivities.value = res.recentActivity.map((item: any, index: number) => ({
+      id: index,
+      type: item.status,
+      case: item.caseName || 'Unknown Case',
+      time: item.timeAgo,
+      executor: item.executedBy || 'System'
+    }))
+    
+  } catch (e) {
+    console.error('Failed to fetch dashboard data', e)
+  }
+}
+
+onMounted(() => {
+  fetchData()
+})
+
 </script>
 
 <template>

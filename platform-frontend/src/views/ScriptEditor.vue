@@ -1,16 +1,21 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { Card, CardContent } from '@/components/ui/card'
 import Button from '@/components/ui/button/Button.vue'
 import Input from '@/components/ui/input/Input.vue'
-import Textarea from '@/components/ui/textarea/Textarea.vue'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Play, Save, Copy, Code } from 'lucide-vue-next'
+import request from '@/api/request'
 
+const route = useRoute()
+
+const caseId = ref<string | null>(null)
 const caseName = ref('Web首页功能测试')
 const deviceType = ref('web')
 const isExecuting = ref(false)
 const executionLogs = ref<string[]>([])
+const scriptContent = ref('')
 
 const defaultScript = `// Web自动化测试脚本 - 关键字驱动
 // 支持自然语言编写测试步骤
@@ -67,175 +72,233 @@ const appScript = `// APP自动化测试脚本 - 基于UIAutomator2/WDA
 // 截图
 截图: app_login_success.png`
 
-const scriptContent = ref(defaultScript)
-
-watch(deviceType, (newValue) => {
-  scriptContent.value = newValue === 'web' ? defaultScript : appScript
+onMounted(async () => {
+    // Check if ID in query or params (we used query in TestCaseManager)
+    const id = route.query.id as string
+    if (id) {
+        caseId.value = id
+        await loadCase(id)
+    } else {
+        scriptContent.value = defaultScript
+    }
 })
 
+const loadCase = async (id: string) => {
+    try {
+        const res: any = await request.get(`/testcases/${id}`)
+        if (res) {
+            caseName.value = res.name
+            deviceType.value = res.type === 'APP' ? 'app' : 'web'
+            scriptContent.value = res.content || (res.type === 'APP' ? appScript : defaultScript)
+        }
+    } catch (e) {
+        console.error('Failed to load case', e)
+    }
+}
+
+watch(deviceType, (newValue) => {
+    if (!caseId.value) { // Only switch default script if creating new
+        scriptContent.value = newValue === 'web' ? defaultScript : appScript
+    }
+})
+
+const handleSave = async () => {
+    try {
+        const payload = {
+            id: caseId.value,
+            name: caseName.value,
+            type: deviceType.value.toUpperCase(),
+            content: scriptContent.value,
+            // Add defaults if missing
+            description: 'Updated from Script Editor',
+            status: 'active'
+        }
+        
+        if (caseId.value) {
+            await request.put('/testcases', payload)
+        } else {
+            await request.post('/testcases', payload)
+        }
+        alert('保存成功')
+    } catch (e) {
+        alert('保存失败')
+    }
+}
+
 const keywords = [
-  { category: '导航操作', items: ['打开URL', '刷新页面', '后退', '前进', '关闭浏览器'] },
-  { category: '元素操作', items: ['点击元素', '输入文本', '清空文本', '选择下拉框', '上传文件'] },
-  { category: '等待操作', items: ['等待元素', '等待时间', '等待页面加载'] },
-  { category: '断言验证', items: ['断言文本', '断言元素存在', '断言URL包含', '断言属性值'] },
-  { category: '其他操作', items: ['截图', '滚动到元素', '执行JS脚本', '切换窗口'] }
+  { category: '导航操作', items: [
+      { label: '打开URL', value: '打开URL: https://example.com' },
+      { label: '刷新页面', value: '刷新页面' },
+      { label: '后退', value: '后退' },
+      { label: '前进', value: '前进' },
+      { label: '关闭浏览器', value: '关闭浏览器' }
+  ]},
+  { category: '元素操作', items: [
+      { label: '点击元素', value: '点击元素: #selector' },
+      { label: '输入文本', value: '输入文本: #selector, text' },
+      { label: '清空文本', value: '清空文本: #selector' },
+      { label: '选择下拉框', value: '选择下拉框: #selector, value' },
+      { label: '上传文件', value: '上传文件: #selector, path/to/file' }
+  ]},
+  { category: '等待操作', items: [
+      { label: '等待元素', value: '等待元素: #selector, 5000' },
+      { label: '等待时间', value: '等待时间: 1000' },
+      { label: '等待页面加载', value: '等待页面加载' }
+  ]},
+  { category: '断言验证', items: [
+      { label: '断言文本', value: '断言文本: #selector, expected_text' },
+      { label: '断言元素存在', value: '断言元素存在: #selector' },
+      { label: '断言URL包含', value: '断言URL包含: part_of_url' },
+      { label: '断言属性值', value: '断言属性值: #selector, attribute, value' }
+  ]},
+  { category: '其他操作', items: [
+      { label: '截图', value: '截图: screenshot.png' },
+      { label: '滚动到元素', value: '滚动到元素: #selector' },
+      { label: '执行JS脚本', value: '执行JS脚本: return document.title' },
+      { label: '切换窗口', value: '切换窗口: 1' }
+  ]}
 ]
 
 const handleExecute = () => {
   isExecuting.value = true
   executionLogs.value = []
   
-  const logs = [
-    '[10:30:15] 开始执行测试用例: ' + caseName.value,
-    '[10:30:15] 初始化测试引擎...',
-    '[10:30:16] ✓ 打开URL: https://example.com',
-    '[10:30:17] ✓ 等待元素: #login-form',
-    '[10:30:18] ✓ 输入文本: #username',
-    '[10:30:18] ✓ 输入文本: #password',
-    '[10:30:19] ✓ 点击元素: #login-button',
-    '[10:30:21] ✓ 等待元素: .dashboard',
-    '[10:30:21] ✓ 断言文本: .welcome-message',
-    '[10:30:22] ✓ 断言URL包含: /dashboard',
-    '[10:30:22] ✓ 截图: login_success.png',
-    '[10:30:23] ✓ 关闭浏览器',
-    '[10:30:23] 测试执行完成 - 全部通过'
-  ]
+  const now = () => new Date().toLocaleTimeString('en-GB', { hour12: false }) // HH:mm:ss
 
-  logs.forEach((log, index) => {
-    setTimeout(() => {
-      executionLogs.value.push(log)
-      if (index === logs.length - 1) {
-        isExecuting.value = false
-      }
-    }, index * 500)
-  })
+  const logs = [
+    `[${now()}] 开始执行测试用例: ` + caseName.value,
+    `[${now()}] 初始化测试引擎...`,
+    `[${now()}] ✓ 打开URL: https://example.com`,
+    `[${now()}] ✓ 等待元素: #login-form`,
+    `[${now()}] ✓ 输入文本: #username`,
+    `[${now()}] ✓ 输入文本: #password`,
+    `[${now()}] ✓ 点击元素: #login-button`,
+    `[${now()}] ✓ 等待元素: .dashboard`,
+    `[${now()}] ✓ 断言文本: .welcome-message`,
+    `[${now()}] ✓ 断言URL包含: /dashboard`,
+    `[${now()}] ✓ 截图: login_success.png`,
+    `[${now()}] ✓ 关闭浏览器`,
+    `[${now()}] 执行完成: 通过`
+  ]
+  
+  let i = 0
+  const interval = setInterval(() => {
+    if (i < logs.length) {
+      executionLogs.value.push(logs[i])
+      i++
+    } else {
+      clearInterval(interval)
+      isExecuting.value = false
+    }
+  }, 500)
 }
 
-const copyKeyword = (item: string) => {
-  navigator.clipboard.writeText(item)
+const handleCopyCode = () => {
+    navigator.clipboard.writeText(scriptContent.value)
+    alert('代码已复制到剪贴板')
 }
 </script>
 
 <template>
-  <div class="p-6 space-y-4">
-    <!-- Header Controls -->
-    <Card class="border-gray-200">
-      <CardContent class="pt-6">
-        <div class="flex gap-4">
-          <div class="flex-1">
-            <label class="block text-sm font-medium text-gray-700 mb-2">用例名称</label>
-            <Input
-              v-model="caseName"
-              placeholder="输入测试用例名称"
-              class="border-gray-300"
-            />
+  <div class="h-full flex flex-col gap-4">
+    <!-- Toolbar -->
+    <Card class="flex-none">
+      <CardContent class="p-4 flex items-center justify-between gap-4">
+        <div class="flex items-center gap-4 flex-1">
+          <div class="space-y-1 flex-1">
+            <div class="text-xs text-gray-500">用例名称</div>
+            <Input v-model="caseName" />
           </div>
-          <div class="w-64">
-            <label class="block text-sm font-medium text-gray-700 mb-2">设备类型</label>
+          <div class="space-y-1 w-40">
+            <div class="text-xs text-gray-500">设备类型</div>
             <Select v-model="deviceType">
-              <SelectTrigger class="border-gray-300">
+              <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="web">Web浏览器</SelectItem>
-                <SelectItem value="android">Android设备</SelectItem>
-                <SelectItem value="ios">iOS设备</SelectItem>
+                <SelectItem value="web">Web 浏览器</SelectItem>
+                <SelectItem value="app">移动端 App</SelectItem>
               </SelectContent>
             </Select>
           </div>
-          <div class="flex items-end gap-2">
-            <Button
-              @click="handleExecute"
-              :disabled="isExecuting"
-              class="bg-[#409EFF] hover:bg-[#3a8ee6]"
-            >
-              <Play class="w-4 h-4 mr-2" />
-              {{ isExecuting ? '执行中...' : '执行' }}
-            </Button>
-            <Button variant="outline" class="border-gray-300">
-              <Save class="w-4 h-4 mr-2" />
-              保存
-            </Button>
-          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <Button :disabled="isExecuting" @click="handleExecute">
+            <Play class="w-4 h-4 mr-2" />
+            {{ isExecuting ? '执行中...' : '执行' }}
+          </Button>
+          <Button variant="outline" @click="handleSave">
+            <Save class="w-4 h-4 mr-2" />
+            保存
+          </Button>
         </div>
       </CardContent>
     </Card>
 
-    <!-- Main Editor Area -->
-    <div class="grid grid-cols-12 gap-4">
+    <div class="flex-1 flex gap-4 min-h-0">
       <!-- Keywords Sidebar -->
-      <div class="col-span-3">
-        <Card class="border-gray-200 h-full">
-          <CardContent class="pt-6">
-            <h3 class="font-semibold text-gray-900 mb-4 flex items-center gap-2">
-              <Code class="w-4 h-4" />
-              关键字列表
+      <Card class="w-64 flex-none overflow-y-auto">
+        <CardContent class="p-4 space-y-6">
+          <div v-for="group in keywords" :key="group.category" class="space-y-2">
+            <h3 class="font-semibold text-sm text-gray-900 flex items-center gap-2">
+              <Code class="w-4 h-4 text-gray-500" />
+              {{ group.category }}
             </h3>
-            <div class="space-y-4">
-              <div v-for="(category, index) in keywords" :key="index">
-                <h4 class="text-sm font-medium text-gray-700 mb-2">{{ category.category }}</h4>
-                <div class="space-y-1">
-                  <button
-                    v-for="(item, idx) in category.items"
-                    :key="idx"
-                    class="w-full text-left px-3 py-2 text-sm text-gray-600 hover:bg-blue-50 hover:text-[#409EFF] rounded transition-colors"
-                    @click="copyKeyword(item)"
-                  >
-                    {{ item }}
-                  </button>
-                </div>
-              </div>
+            <div class="grid grid-cols-1 gap-1">
+              <button
+                v-for="item in group.items"
+                :key="item.label"
+                class="text-left text-sm px-2 py-1.5 rounded hover:bg-gray-100 text-gray-600 transition-colors"
+                @click="scriptContent += (scriptContent ? '\n' : '') + item.value"
+              >
+                {{ item.label }}
+              </button>
             </div>
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+        </CardContent>
+      </Card>
 
-      <!-- Code Editor -->
-      <div class="col-span-9">
-        <Card class="border-gray-200 h-full">
-          <CardContent class="pt-6">
-            <div class="flex items-center justify-between mb-4">
-              <h3 class="font-semibold text-gray-900">脚本编辑器</h3>
-              <Button variant="outline" size="sm" class="border-gray-300">
-                <Copy class="w-4 h-4 mr-2" />
-                复制代码
-              </Button>
+      <!-- Main Editor Area -->
+      <div class="flex-1 flex flex-col gap-4 min-w-0">
+        <!-- Script Editor -->
+        <Card class="flex-1 flex flex-col min-h-0">
+          <div class="flex items-center justify-between px-4 py-2 border-b border-gray-100">
+            <span class="font-semibold text-sm">脚本编辑器</span>
+            <Button variant="ghost" size="sm" @click="handleCopyCode">
+              <Copy class="w-4 h-4 mr-2" />
+              复制代码
+            </Button>
+          </div>
+          <div class="flex-1 relative">
+            <textarea
+              v-model="scriptContent"
+              class="absolute inset-0 w-full h-full p-4 font-mono text-sm bg-gray-900 text-gray-100 resize-none focus:outline-none"
+              spellcheck="false"
+            ></textarea>
+          </div>
+        </Card>
+
+        <!-- Execution Logs -->
+        <Card class="h-48 flex-none flex flex-col">
+          <div class="px-4 py-2 border-b border-gray-100 bg-gray-50">
+            <span class="font-semibold text-sm">执行日志</span>
+          </div>
+          <div class="flex-1 p-4 overflow-y-auto font-mono text-xs bg-white">
+            <div v-if="executionLogs.length === 0" class="text-gray-400 italic">
+              等待执行...
             </div>
-            <div class="relative">
-              <Textarea
-                v-model="scriptContent"
-                class="font-mono text-sm min-h-[500px] bg-[#1e1e1e] text-[#d4d4d4] border-gray-700 resize-none pl-12"
-                :style="{ lineHeight: '1.6', tabSize: '2' }"
-              />
-              <!-- Line numbers overlay simulation -->
-              <div class="absolute left-3 top-3 text-xs text-gray-500 font-mono pointer-events-none select-none">
-                <div v-for="i in 35" :key="i" style="line-height: 1.6; height: 21px;">
-                  {{ i }}
-                </div>
+            <div v-for="(log, index) in executionLogs" :key="index" class="space-y-1">
+              <div :class="{
+                'text-green-600': log.includes('✓'),
+                'text-blue-600': log.includes('开始') || log.includes('初始化'),
+                'text-gray-600': !log.includes('✓') && !log.includes('开始')
+              }">
+                {{ log }}
               </div>
             </div>
-            <div class="mt-4 p-3 bg-blue-50 border border-blue-200 rounded text-sm text-blue-800">
-              💡 提示: 使用自然语言关键字编写测试步骤，支持参数化和变量引用 ${variable}
-            </div>
-          </CardContent>
+          </div>
         </Card>
       </div>
     </div>
-
-    <!-- Execution Console -->
-    <Card v-if="executionLogs.length > 0" class="border-gray-200">
-      <CardContent class="pt-6">
-        <h3 class="font-semibold text-gray-900 mb-4">执行日志</h3>
-        <div class="bg-gray-900 text-green-400 p-4 rounded font-mono text-sm h-64 overflow-y-auto">
-          <div v-for="(log, index) in executionLogs" :key="index" class="mb-1">
-            {{ log }}
-          </div>
-          <div v-if="isExecuting" class="mt-2 animate-pulse">
-            <span class="inline-block w-2 h-2 bg-green-400 rounded-full mr-2"></span>
-            执行中...
-          </div>
-        </div>
-      </CardContent>
-    </Card>
   </div>
 </template>

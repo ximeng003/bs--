@@ -1,0 +1,145 @@
+<mxfile host="app.diagrams.net" modified="2024-01-20T10:00:00.000Z" agent="5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" etag="r-S1" version="22.1.18" type="device">
+  <diagram id="PrTgs" name="Page-1">
+    <mxGraphModel dx="1422" dy="794" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        
+        <!-- Root Node -->
+        <mxCell id="root_node" value="企业级自动化测试管理平台" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2b3e50;strokeColor=#ffffff;fontColor=#ffffff;fontSize=16;fontStyle=1;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="460" y="40" width="280" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- Module 1 -->
+        <mxCell id="m1" value="1. 系统基础与权限管理" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="40" y="160" width="180" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="edge1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="root_node" target="m1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <!-- M1 Children -->
+        <mxCell id="m1_1" value="JWT身份认证" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b0bec5;" vertex="1" parent="1">
+          <mxGeometry x="50" y="240" width="160" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="m1_2" value="RBAC角色权限" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b0bec5;" vertex="1" parent="1">
+          <mxGeometry x="50" y="290" width="160" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="m1_3" value="微服务底座" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b0bec5;" vertex="1" parent="1">
+          <mxGeometry x="50" y="340" width="160" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="m1_4" value="操作日志审计" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b0bec5;" vertex="1" parent="1">
+          <mxGeometry x="50" y="390" width="160" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_m1_1" edge="1" parent="1" source="m1" target="m1_1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="edge_m1_2" edge="1" parent="1" source="m1" target="m1_2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="edge_m1_3" edge="1" parent="1" source="m1" target="m1_3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="edge_m1_4" edge="1" parent="1" source="m1" target="m1_4"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+
+        <!-- Module 2 -->
+        <mxCell id="m2" value="2. 多环境与项目配置" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="260" y="160" width="180" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="edge2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="root_node" target="m2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <!-- M2 Children -->
+        <mxCell id="m2_1" value="环境配置中心" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b0bec5;" vertex="1" parent="1">
+          <mxGeometry x="270" y="240" width="160" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="m2_2" value="全局变量管理" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b0bec5;" vertex="1" parent="1">
+          <mxGeometry x="270" y="290" width="160" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="m2_3" value="加密参数管理" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b0bec5;" vertex="1" parent="1">
+          <mxGeometry x="270" y="340" width="160" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="m2_4" value="动态环境切换" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b0bec5;" vertex="1" parent="1">
+          <mxGeometry x="270" y="390" width="160" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_m2_1" edge="1" parent="1" source="m2" target="m2_1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="edge_m2_2" edge="1" parent="1" source="m2" target="m2_2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="edge_m2_3" edge="1" parent="1" source="m2" target="m2_3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="edge_m2_4" edge="1" parent="1" source="m2" target="m2_4"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+
+        <!-- Module 3 -->
+        <mxCell id="m3" value="3. 全栈用例管理 (核心)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="480" y="160" width="180" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="edge3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="root_node" target="m3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <!-- M3 Children -->
+        <mxCell id="m3_1" value="API请求构建器" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b0bec5;" vertex="1" parent="1">
+          <mxGeometry x="490" y="240" width="160" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="m3_2" value="接口关联(JSONPath/正则)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b0bec5;" vertex="1" parent="1">
+          <mxGeometry x="490" y="290" width="160" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="m3_3" value="UI脚本在线维护" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b0bec5;" vertex="1" parent="1">
+          <mxGeometry x="490" y="340" width="160" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="m3_4" value="Selenium/Playwright集成" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b0bec5;" vertex="1" parent="1">
+          <mxGeometry x="490" y="390" width="160" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_m3_1" edge="1" parent="1" source="m3" target="m3_1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="edge_m3_2" edge="1" parent="1" source="m3" target="m3_2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="edge_m3_3" edge="1" parent="1" source="m3" target="m3_3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="edge_m3_4" edge="1" parent="1" source="m3" target="m3_4"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+
+        <!-- Module 4 -->
+        <mxCell id="m4" value="4. 测试计划与执行" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="700" y="160" width="180" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="edge4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="root_node" target="m4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <!-- M4 Children -->
+        <mxCell id="m4_1" value="测试集合管理" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b0bec5;" vertex="1" parent="1">
+          <mxGeometry x="710" y="240" width="160" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="m4_2" value="定时任务调度" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b0bec5;" vertex="1" parent="1">
+          <mxGeometry x="710" y="290" width="160" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="m4_3" value="失败重试机制" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b0bec5;" vertex="1" parent="1">
+          <mxGeometry x="710" y="340" width="160" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="m4_4" value="分布式执行引擎" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b0bec5;" vertex="1" parent="1">
+          <mxGeometry x="710" y="390" width="160" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_m4_1" edge="1" parent="1" source="m4" target="m4_1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="edge_m4_2" edge="1" parent="1" source="m4" target="m4_2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="edge_m4_3" edge="1" parent="1" source="m4" target="m4_3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="edge_m4_4" edge="1" parent="1" source="m4" target="m4_4"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+
+        <!-- Module 5 -->
+        <mxCell id="m5" value="5. 数据可视化与报告" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="920" y="160" width="180" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="edge5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="root_node" target="m5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <!-- M5 Children -->
+        <mxCell id="m5_1" value="ECharts数据看板" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b0bec5;" vertex="1" parent="1">
+          <mxGeometry x="930" y="240" width="160" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="m5_2" value="缺陷分布趋势" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b0bec5;" vertex="1" parent="1">
+          <mxGeometry x="930" y="290" width="160" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="m5_3" value="详细HTML报告" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b0bec5;" vertex="1" parent="1">
+          <mxGeometry x="930" y="340" width="160" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="m5_4" value="错误截图留存" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b0bec5;" vertex="1" parent="1">
+          <mxGeometry x="930" y="390" width="160" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_m5_1" edge="1" parent="1" source="m5" target="m5_1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="edge_m5_2" edge="1" parent="1" source="m5" target="m5_2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="edge_m5_3" edge="1" parent="1" source="m5" target="m5_3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="edge_m5_4" edge="1" parent="1" source="m5" target="m5_4"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

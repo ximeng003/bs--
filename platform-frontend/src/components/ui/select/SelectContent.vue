@@ -5,14 +5,17 @@
 -->
 <script setup lang="ts">
 import { cn } from '@/lib/utils'
+import { inject, Ref } from 'vue'
 
 defineProps<{
   class?: string
 }>()
+
+const open = inject<Ref<boolean>>('selectOpen')
 </script>
 
 <template>
-  <div :class="cn('relative z-50 min-w-[8rem] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md animate-in fade-in-80', $props.class)">
+  <div v-if="open" :class="cn('absolute top-full left-0 mt-2 z-50 min-w-[8rem] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md animate-in fade-in-80', $props.class)">
     <div class="p-1">
         <slot />
     </div>

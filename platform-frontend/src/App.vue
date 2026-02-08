@@ -1,88 +1,80 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import Sidebar from '@/components/Sidebar.vue'
-import Dashboard from '@/components/Dashboard.vue'
-import ApiCaseEditor from '@/views/ApiCaseEditor.vue'
-import ScriptEditor from '@/views/ScriptEditor.vue'
-import ReportDetail from '@/views/ReportDetail.vue'
-import TestPlanManager from '@/views/TestPlanManager.vue'
-import Settings from '@/views/Settings.vue'
-import TestCaseManager from '@/views/TestCaseManager.vue'
-import ExecutionHistory from '@/views/ExecutionHistory.vue'
-import { ArrowLeft } from 'lucide-vue-next'
+import { ArrowLeft, LogOut } from 'lucide-vue-next'
 import Button from '@/components/ui/button/Button.vue'
+import { userStore } from '@/store/userStore'
 
-const currentPage = ref('dashboard')
-const currentReportId = ref<string | null>(null)
-const currentCaseId = ref<string | null>(null)
-const currentCaseType = ref<string | null>(null)
+const route = useRoute()
+const router = useRouter()
+
+// Map routes to sidebar IDs
+const currentPage = computed(() => {
+  const path = route.path
+  if (path === '/' || path === '/dashboard') return 'dashboard'
+  if (path.startsWith('/api-test')) return 'api'
+  if (path.startsWith('/web-app')) return 'web-app'
+  if (path.startsWith('/plans')) return 'plans'
+  if (path.startsWith('/reports')) return 'report'
+  if (path.startsWith('/settings')) return 'settings'
+  return 'dashboard'
+})
 
 const pageTitle = computed(() => {
-  switch (currentPage.value) {
-    case 'dashboard': return '工作台'
-    case 'api': return currentCaseId.value ? '编辑 API 用例' : 'API 测试用例'
-    case 'web-app': return 'Web/App 脚本编辑'
-    case 'report': return currentReportId.value ? '测试报告详情' : '测试报告'
-    case 'plans': return '测试计划'
-    case 'settings': return '系统设置'
-    default: return '工作台'
-  }
+  if (route.name === 'Dashboard') return '工作台'
+  if (route.name === 'ApiCaseEditor') return '编辑 API 用例'
+  if (route.name === 'ApiTest') return '测试用例'
+  if (route.name === 'WebApp') return 'Web/App 脚本编辑'
+  if (route.name === 'ReportDetail') return '测试报告详情'
+  if (route.name === 'Reports') return '测试报告'
+  if (route.name === 'TestPlans') return '测试计划'
+  if (route.name === 'Settings') return '系统设置'
+  return '工作台'
+})
+
+const showLayout = computed(() => {
+  return route.meta.layout !== 'blank'
 })
 
 const handlePageChange = (page: string) => {
-  currentPage.value = page
-  // Reset sub-views when changing main pages
-  currentReportId.value = null
-  currentCaseId.value = null
-  currentCaseType.value = null
-}
-
-const handleViewReport = (id: string) => {
-  currentReportId.value = id
-}
-
-const handleEditCase = (id: string, type: string) => {
-  currentCaseId.value = id
-  currentCaseType.value = type
-  if (type === 'API') {
-    currentPage.value = 'api'
-  } else {
-    currentPage.value = 'web-app'
+  switch (page) {
+    case 'dashboard': router.push('/'); break;
+    case 'api': router.push('/api-test'); break;
+    case 'web-app': router.push('/web-app'); break;
+    case 'plans': router.push('/plans'); break;
+    case 'report': router.push('/reports'); break;
+    case 'settings': router.push('/settings'); break;
   }
 }
 
 const handleBack = () => {
-  if (currentReportId.value) {
-    currentReportId.value = null
-  } else if (currentCaseId.value) {
-    // If we are in 'web-app' but came from 'api' (TestCaseManager), we might want to go back to 'api'
-    // But for simplicity, if we are in 'web-app', we just stay there? 
-    // Wait, 'web-app' default view is ScriptEditor. 'api' default is TestCaseManager.
-    // If we edited a WEB case, we are in 'web-app'. 
-    // If we want to go back to the list, we should probably go to 'api' (TestCaseManager).
-    // Or maybe 'web-app' should also have a list view?
-    // Given the Sidebar structure, 'web-app' seems to be a separate module.
-    // Let's assume 'api' is the Case Manager for ALL types for now, as implemented in TestCaseManager.
-    // So back always goes to TestCaseManager (api page) or we reset currentCaseId.
-    
-    if (currentPage.value === 'web-app' && currentCaseType.value !== 'API') {
-        // If we were editing a WEB app, going back might mean going back to the list in 'api' page?
-        // Or maybe 'web-app' has its own list?
-        // Let's just go back to 'api' page which has the list.
-        currentPage.value = 'api'
-    }
-    currentCaseId.value = null
-    currentCaseType.value = null
-  }
+  router.back()
 }
 
 const showBackButton = computed(() => {
-  return !!currentReportId.value || (!!currentCaseId.value && currentPage.value === 'api') || (!!currentCaseId.value && currentPage.value === 'web-app' && currentCaseType.value !== null)
+  // Show back button on detail pages
+  return ['ApiCaseEditor', 'ReportDetail'].includes(route.name as string)
 })
+
+const handleLogout = () => {
+  userStore.clearUser()
+  router.push('/login')
+}
+
+const goToProfile = () => {
+  router.push('/profile')
+}
 </script>
 
 <template>
-  <div class="flex h-screen bg-gray-50">
+  <!-- Login Layout -->
+  <div v-if="!showLayout" class="min-h-screen bg-gray-100">
+    <router-view />
+  </div>
+
+  <!-- Main Layout -->
+  <div v-else class="flex h-screen bg-gray-50">
     <!-- Left Sidebar Navigation -->
     <Sidebar :currentPage="currentPage" @pageChange="handlePageChange" />
 
@@ -99,54 +91,42 @@ const showBackButton = computed(() => {
               <h1 class="text-xl font-semibold text-gray-900">
                 {{ pageTitle }}
               </h1>
-              <p class="text-sm text-gray-500 mt-1">自动化测试平台</p>
             </div>
           </div>
           <div class="flex items-center gap-4">
-            <div class="flex items-center gap-2 text-sm">
-              <span class="w-2 h-2 bg-green-500 rounded-full"></span>
-              <span class="text-gray-600">在线</span>
+            <div class="flex items-center gap-2">
+              <!-- Removed Online Status as requested -->
             </div>
-            <div class="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-white text-sm">
-              U
+            
+            <!-- User Profile & Logout -->
+            <div class="flex items-center gap-3">
+              <div 
+                class="flex items-center gap-2 cursor-pointer hover:bg-gray-100 p-1 pr-3 rounded-full transition-colors border border-transparent hover:border-gray-200" 
+                @click="goToProfile" 
+                title="个人中心"
+              >
+                <div class="w-8 h-8 rounded-full bg-blue-100 overflow-hidden border border-gray-200">
+                  <img 
+                    :src="`https://api.dicebear.com/7.x/avataaars/svg?seed=${userStore.user?.username || 'user'}`" 
+                    alt="Avatar"
+                    class="w-full h-full object-cover"
+                  />
+                </div>
+                <span class="text-sm text-gray-700 font-medium">{{ userStore.user?.username || 'User' }}</span>
+              </div>
+              
+              <Button variant="ghost" size="icon" @click="handleLogout" title="退出登录" class="text-gray-500 hover:text-red-600">
+                <LogOut class="w-5 h-5" />
+              </Button>
             </div>
+
           </div>
         </div>
       </header>
 
-      <!-- Main Content -->
-      <main class="flex-1 overflow-auto">
-        <Dashboard v-if="currentPage === 'dashboard'" />
-        
-        <!-- API / Test Case Manager Section -->
-        <template v-else-if="currentPage === 'api'">
-          <ApiCaseEditor v-if="currentCaseId && currentCaseType === 'API'" />
-          <TestCaseManager v-else @edit-case="handleEditCase" />
-        </template>
-
-        <!-- Web/App Script Editor Section -->
-        <template v-else-if="currentPage === 'web-app'">
-           <!-- If we have a case ID, we show the editor with that case context (simulated) -->
-           <!-- If not, we show ScriptEditor as default (maybe create new script) -->
-           <ScriptEditor />
-        </template>
-
-        <!-- Report Section -->
-        <template v-else-if="currentPage === 'report'">
-          <ReportDetail v-if="currentReportId" />
-          <ExecutionHistory v-else @view-report="handleViewReport" />
-        </template>
-
-        <TestPlanManager v-else-if="currentPage === 'plans'" />
-        
-        <Settings v-else-if="currentPage === 'settings'" />
-        
-        <div v-else class="p-6 flex items-center justify-center h-full text-gray-400">
-          <div class="text-center">
-            <h2 class="text-xl font-semibold mb-2">功能开发中</h2>
-            <p>{{ pageTitle }} 模块即将上线</p>
-          </div>
-        </div>
+      <!-- Page Content -->
+      <main class="flex-1 overflow-auto p-6">
+        <router-view />
       </main>
     </div>
   </div>

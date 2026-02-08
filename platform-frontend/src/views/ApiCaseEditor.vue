@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { Card, CardContent } from '@/components/ui/card'
 import Button from '@/components/ui/button/Button.vue'
 import Input from '@/components/ui/input/Input.vue'
@@ -7,32 +8,148 @@ import Textarea from '@/components/ui/textarea/Textarea.vue'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Play, Save, Clock } from 'lucide-vue-next'
+import request from '@/api/request'
+
+const route = useRoute()
+const caseId = ref<string | null>(null)
+const name = ref('New API Case')
 
 const method = ref('GET')
-const url = ref('https://api.example.com/users/login')
+const url = ref('https://api.example.com')
+const bodyType = ref('json')
+const bodyContent = ref('{}')
+
 const responseData = ref<any>(null)
 const statusCode = ref<number | null>(null)
 const responseTime = ref<number | null>(null)
 
-const handleSend = () => {
-  // Simulate API call
-  statusCode.value = 200
-  responseTime.value = 342
-  responseData.value = {
-    success: true,
-    data: {
-      userId: "12345",
-      username: "testuser",
-      token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-      expiresIn: 3600
-    },
-    message: "登录成功"
+// For simplicity, we manage headers/params as arrays
+const headers = ref([{ key: 'Content-Type', value: 'application/json', active: true }])
+const params = ref([{ key: '', value: '', active: true }])
+const assertions = ref([{ type: 'status', path: '', value: '200', active: true }])
+
+onMounted(async () => {
+    const id = route.params.id as string
+    if (id) {
+        caseId.value = id
+        await loadCase(id)
+    }
+})
+
+const loadCase = async (id: string) => {
+    try {
+        const res: any = await request.get(`/testcases/${id}`)
+        if (res) {
+            name.value = res.name
+            // Parse content JSON
+            try {
+                const content = JSON.parse(res.content || '{}')
+                method.value = content.method || 'GET'
+                url.value = content.url || ''
+                bodyType.value = content.bodyType || 'json'
+                bodyContent.value = content.body || '{}'
+                headers.value = content.headers || []
+                params.value = content.params || []
+                assertions.value = content.assertions || []
+            } catch (e) {
+                console.error('Failed to parse content', e)
+            }
+        }
+    } catch (e) {
+        console.error('Failed to load case', e)
+    }
+}
+
+const handleSave = async () => {
+    const content = JSON.stringify({
+        method: method.value,
+        url: url.value,
+        bodyType: bodyType.value,
+        body: bodyContent.value,
+        headers: headers.value,
+        params: params.value,
+        assertions: assertions.value
+    })
+    
+    const payload = {
+        id: caseId.value,
+        name: name.value,
+        type: 'API',
+        content: content,
+        description: 'Updated from API Editor',
+        status: 'active',
+        environment: 'dev' // Default
+    }
+    
+    try {
+        if (caseId.value) {
+            await request.put('/testcases', payload)
+        } else {
+            await request.post('/testcases', payload)
+        }
+        alert('保存成功')
+    } catch (e) {
+        alert('保存失败')
+    }
+}
+
+const handleSend = async () => {
+  try {
+    const payload = {
+        method: method.value,
+        url: url.value,
+        bodyType: bodyType.value,
+        body: bodyContent.value,
+        headers: headers.value,
+        params: params.value
+    }
+    
+    // Call backend execute endpoint
+    const res: any = await request.post('/testcases/execute', payload)
+    
+    statusCode.value = res.statusCode
+    responseTime.value = res.time
+    
+    // Parse body if it is JSON string for better display
+    let parsedBody = res.body
+    try {
+        if (typeof res.body === 'string' && (res.body.startsWith('{') || res.body.startsWith('['))) {
+            parsedBody = JSON.parse(res.body)
+        }
+    } catch (e) {
+        // keep as string if parse fails
+    }
+
+    responseData.value = parsedBody
+    
+  } catch (e: any) {
+    console.error('Failed to execute request', e)
+    responseData.value = {
+        error: e.message || 'Unknown error'
+    }
+    statusCode.value = 500
+    responseTime.value = 0
   }
 }
+
+const addHeader = () => headers.value.push({ key: '', value: '', active: true })
+const removeHeader = (index: number) => headers.value.splice(index, 1)
+
+const addParam = () => params.value.push({ key: '', value: '', active: true })
+const removeParam = (index: number) => params.value.splice(index, 1)
+
+const addAssertion = () => assertions.value.push({ type: 'status', path: '', value: '', active: true })
+const removeAssertion = (index: number) => assertions.value.splice(index, 1)
+
 </script>
 
 <template>
   <div class="p-6 space-y-4">
+    <!-- Top Bar -->
+    <div class="flex items-center gap-4 mb-4">
+        <Input v-model="name" placeholder="Case Name" class="w-64" />
+    </div>
+
     <!-- URL Input Section -->
     <Card class="border-gray-200">
       <CardContent class="pt-6">
@@ -61,7 +178,7 @@ const handleSend = () => {
             <Play class="w-4 h-4 mr-2" />
             发送
           </Button>
-          <Button variant="outline" class="border-gray-300">
+          <Button variant="outline" class="border-gray-300" @click="handleSave">
             <Save class="w-4 h-4 mr-2" />
             保存
           </Button>
@@ -88,22 +205,23 @@ const handleSend = () => {
                 <div class="col-span-5">VALUE</div>
                 <div class="col-span-1"></div>
               </div>
-              <div v-for="i in 3" :key="i" class="grid grid-cols-12 gap-2 items-center">
+              <div v-for="(item, index) in params" :key="index" class="grid grid-cols-12 gap-2 items-center">
                 <div class="col-span-1 flex justify-center">
-                  <input type="checkbox" checked class="rounded" />
+                  <input type="checkbox" v-model="item.active" class="rounded" />
                 </div>
                 <div class="col-span-5">
-                  <Input placeholder="参数名" class="border-gray-300" />
+                  <Input v-model="item.key" placeholder="参数名" class="border-gray-300" />
                 </div>
                 <div class="col-span-5">
-                  <Input placeholder="参数值" class="border-gray-300" />
+                  <Input v-model="item.value" placeholder="参数值" class="border-gray-300" />
                 </div>
                 <div class="col-span-1">
-                  <Button variant="ghost" size="sm" class="text-gray-400 hover:text-red-600">
+                  <Button variant="ghost" size="sm" class="text-gray-400 hover:text-red-600" @click="removeParam(index)">
                     ×
                   </Button>
                 </div>
               </div>
+              <Button variant="outline" size="sm" @click="addParam">Add Param</Button>
             </div>
           </TabsContent>
 
@@ -115,44 +233,29 @@ const handleSend = () => {
                 <div class="col-span-5">VALUE</div>
                 <div class="col-span-1"></div>
               </div>
-              <div class="grid grid-cols-12 gap-2 items-center">
+              <div v-for="(item, index) in headers" :key="index" class="grid grid-cols-12 gap-2 items-center">
                 <div class="col-span-1 flex justify-center">
-                  <input type="checkbox" checked class="rounded" />
+                  <input type="checkbox" v-model="item.active" class="rounded" />
                 </div>
                 <div class="col-span-5">
-                  <Input model-value="Content-Type" class="border-gray-300" />
+                  <Input v-model="item.key" placeholder="Header Key" class="border-gray-300" />
                 </div>
                 <div class="col-span-5">
-                  <Input model-value="application/json" class="border-gray-300" />
+                  <Input v-model="item.value" placeholder="Header Value" class="border-gray-300" />
                 </div>
                 <div class="col-span-1">
-                  <Button variant="ghost" size="sm" class="text-gray-400 hover:text-red-600">
+                  <Button variant="ghost" size="sm" class="text-gray-400 hover:text-red-600" @click="removeHeader(index)">
                     ×
                   </Button>
                 </div>
               </div>
-              <div class="grid grid-cols-12 gap-2 items-center">
-                <div class="col-span-1 flex justify-center">
-                  <input type="checkbox" checked class="rounded" />
-                </div>
-                <div class="col-span-5">
-                  <Input model-value="Authorization" class="border-gray-300" />
-                </div>
-                <div class="col-span-5">
-                  <Input model-value="Bearer ${API_TOKEN}" class="border-gray-300" />
-                </div>
-                <div class="col-span-1">
-                  <Button variant="ghost" size="sm" class="text-gray-400 hover:text-red-600">
-                    ×
-                  </Button>
-                </div>
-              </div>
+              <Button variant="outline" size="sm" @click="addHeader">Add Header</Button>
             </div>
           </TabsContent>
 
           <TabsContent value="body" class="space-y-4">
             <div>
-              <Select default-value="json">
+              <Select v-model="bodyType">
                 <SelectTrigger class="w-48 border-gray-300 mb-3">
                   <SelectValue />
                 </SelectTrigger>
@@ -163,11 +266,8 @@ const handleSend = () => {
                 </SelectContent>
               </Select>
               <Textarea
+                v-model="bodyContent"
                 class="font-mono text-sm min-h-[300px] bg-gray-900 text-green-400 border-gray-700"
-                :model-value="JSON.stringify({
-                  username: 'testuser',
-                  password: 'Test@123456'
-                }, null, 2)"
               />
             </div>
           </TabsContent>
@@ -181,12 +281,12 @@ const handleSend = () => {
                 <div class="col-span-3">期望值</div>
                 <div class="col-span-1"></div>
               </div>
-              <div class="grid grid-cols-12 gap-2 items-center">
+              <div v-for="(item, index) in assertions" :key="index" class="grid grid-cols-12 gap-2 items-center">
                 <div class="col-span-1 flex justify-center">
-                  <input type="checkbox" checked class="rounded" />
+                  <input type="checkbox" v-model="item.active" class="rounded" />
                 </div>
                 <div class="col-span-3">
-                  <Select default-value="status">
+                  <Select v-model="item.type">
                     <SelectTrigger class="border-gray-300">
                       <SelectValue />
                     </SelectTrigger>
@@ -198,45 +298,18 @@ const handleSend = () => {
                   </Select>
                 </div>
                 <div class="col-span-4">
-                  <Input model-value="-" disabled class="border-gray-300 bg-gray-50" />
+                  <Input v-model="item.path" placeholder="Path" class="border-gray-300" />
                 </div>
                 <div class="col-span-3">
-                  <Input model-value="200" class="border-gray-300" />
+                  <Input v-model="item.value" placeholder="Value" class="border-gray-300" />
                 </div>
                 <div class="col-span-1">
-                  <Button variant="ghost" size="sm" class="text-gray-400 hover:text-red-600">
+                  <Button variant="ghost" size="sm" class="text-gray-400 hover:text-red-600" @click="removeAssertion(index)">
                     ×
                   </Button>
                 </div>
               </div>
-              <div class="grid grid-cols-12 gap-2 items-center">
-                <div class="col-span-1 flex justify-center">
-                  <input type="checkbox" checked class="rounded" />
-                </div>
-                <div class="col-span-3">
-                  <Select default-value="json">
-                    <SelectTrigger class="border-gray-300">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="status">状态码</SelectItem>
-                      <SelectItem value="json">JSON路径</SelectItem>
-                      <SelectItem value="time">响应时间</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div class="col-span-4">
-                  <Input model-value="$.data.success" class="border-gray-300" />
-                </div>
-                <div class="col-span-3">
-                  <Input model-value="true" class="border-gray-300" />
-                </div>
-                <div class="col-span-1">
-                  <Button variant="ghost" size="sm" class="text-gray-400 hover:text-red-600">
-                    ×
-                  </Button>
-                </div>
-              </div>
+              <Button variant="outline" size="sm" @click="addAssertion">Add Assertion</Button>
             </div>
           </TabsContent>
         </Tabs>

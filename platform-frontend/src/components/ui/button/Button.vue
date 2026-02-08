@@ -6,11 +6,13 @@ interface Props {
   size?: 'default' | 'sm' | 'lg' | 'icon'
   class?: string
   disabled?: boolean
+  type?: 'button' | 'submit' | 'reset'
 }
 
 const props = withDefaults(defineProps<Props>(), {
   variant: 'default',
   size: 'default',
+  type: 'button',
 })
 
 const variants = {
@@ -32,6 +34,7 @@ const sizes = {
 
 <template>
   <button
+    :type="props.type"
     :class="cn(
       'inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50',
       variants[props.variant],

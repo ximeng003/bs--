@@ -8,10 +8,12 @@ const props = defineProps<{
 }>()
 
 const selectValue = inject<Ref<string>>('selectValue')
+const toggleSelect = inject<() => void>('toggleSelect')
 
 function select() {
     if (selectValue) {
         selectValue.value = props.value
+        toggleSelect?.()
     }
 }
 </script>

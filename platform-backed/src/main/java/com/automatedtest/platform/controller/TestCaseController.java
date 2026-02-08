@@ -1,6 +1,8 @@
 package com.automatedtest.platform.controller;
 
 import com.automatedtest.platform.common.Result;
+import com.automatedtest.platform.dto.ApiTestRequestDTO;
+import com.automatedtest.platform.dto.ApiTestResponseDTO;
 import com.automatedtest.platform.entity.TestCase;
 import com.automatedtest.platform.service.TestCaseService;
 import com.baomidou.mybatisplus.core.metadata.IPage;
@@ -14,6 +16,11 @@ public class TestCaseController {
 
     @Autowired
     private TestCaseService testCaseService;
+
+    @PostMapping("/execute")
+    public Result<ApiTestResponseDTO> execute(@RequestBody ApiTestRequestDTO request) {
+        return Result.success(testCaseService.executeApiTest(request));
+    }
 
     @GetMapping
     public Result<IPage<TestCase>> list(@RequestParam(defaultValue = "1") Integer page,

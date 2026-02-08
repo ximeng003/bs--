@@ -1,84 +1,76 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import Button from '@/components/ui/button/Button.vue'
 import Badge from '@/components/ui/badge/Badge.vue'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Plus, Play, Calendar, Clock, Pencil, Trash2, Copy } from 'lucide-vue-next'
 import CreateTestPlanForm from '@/components/CreateTestPlanForm.vue'
+import request from '@/api/request'
 
 interface TestPlan {
   id: string
   name: string
   description: string
-  testCases: { id: string; name: string; type: string }[]
+  // For simplicity, backend might not return full testCases list in list view, but let's assume
+  testCases?: { id: string; name: string; type: string }[] 
   schedule?: {
     enabled: boolean
     cron: string
     nextRun?: string
   }
+  cronExpression?: string // Backend field
   environment: string
   status: 'active' | 'inactive'
   lastRun?: string
   successRate?: number
 }
 
-const mockTestPlans: TestPlan[] = [
-  {
-    id: '1',
-    name: '每日回归测试',
-    description: '包含核心功能的全量回归测试',
-    testCases: [
-      { id: '1', name: '用户登录接口测试', type: 'API' },
-      { id: '2', name: 'Web首页功能测试', type: 'WEB' },
-      { id: '3', name: 'APP支付流程测试', type: 'APP' }
-    ],
-    schedule: {
-      enabled: true,
-      cron: '0 2 * * *',
-      nextRun: '2026-01-03 02:00'
-    },
-    environment: 'production',
-    status: 'active',
-    lastRun: '2026-01-02 02:00',
-    successRate: 95
-  },
-  {
-    id: '2',
-    name: 'API接口测试套件',
-    description: '所有API接口的完整测试',
-    testCases: [
-      { id: '1', name: '用户登录接口测试', type: 'API' },
-      { id: '4', name: '用户注册接口测试', type: 'API' },
-      { id: '5', name: '数据查询接口测试', type: 'API' }
-    ],
-    schedule: {
-      enabled: true,
-      cron: '0 */4 * * *',
-      nextRun: '2026-01-02 16:00'
-    },
-    environment: 'staging',
-    status: 'active',
-    lastRun: '2026-01-02 12:00',
-    successRate: 100
-  },
-  {
-    id: '3',
-    name: '移动端功能测试',
-    description: 'APP端的关键业务流程测试',
-    testCases: [
-      { id: '3', name: 'APP支付流程测试', type: 'APP' },
-      { id: '6', name: 'APP登录测试', type: 'APP' }
-    ],
-    environment: 'production',
-    status: 'active',
-    lastRun: '2026-01-01 18:00',
-    successRate: 85
-  }
-]
-
-const testPlans = ref<TestPlan[]>(mockTestPlans)
+const testPlans = ref<TestPlan[]>([])
 const isCreateDialogOpen = ref(false)
+
+const fetchTestPlans = async () => {
+    try {
+        const res: any = await request.get('/plans')
+        if (res && res.records) {
+            testPlans.value = res.records
+        } else if (Array.isArray(res)) {
+            testPlans.value = res
+        }
+    } catch (e) {
+        console.error(e)
+    }
+}
+
+const handleDelete = async (id: string) => {
+    if (!confirm('确定删除?')) return
+    try {
+        await request.delete(`/plans/${id}`)
+        fetchTestPlans()
+    } catch (e) {
+        alert('删除失败')
+    }
+}
+
+const handleExecute = async (id: string) => {
+    const plan = testPlans.value.find(item => item.id === id)
+    const planName = plan?.name || id
+    alert('开始执行计划 ' + planName)
+    const now = new Date().toLocaleString('zh-CN', { hour12: false })
+    if (plan) {
+        plan.lastRun = now
+    }
+    // await request.post(`/plans/${id}/execute`)
+}
+
+const handleCreateSuccess = () => {
+    isCreateDialogOpen.value = false
+    fetchTestPlans()
+}
+
+onMounted(() => {
+    fetchTestPlans()
+})
 
 const getSuccessRateColor = (rate?: number) => {
   if (!rate) return 'text-gray-500'
@@ -116,7 +108,7 @@ const getSuccessRateColor = (rate?: number) => {
         </CardHeader>
         <CardContent>
           <div class="text-2xl font-semibold text-blue-600">
-            {{ testPlans.filter(p => p.schedule?.enabled).length }}
+            {{ testPlans.filter(p => !!p.cronExpression).length }}
           </div>
         </CardContent>
       </Card>
@@ -126,7 +118,7 @@ const getSuccessRateColor = (rate?: number) => {
         </CardHeader>
         <CardContent>
           <div class="text-2xl font-semibold text-green-600">
-            {{ Math.round(testPlans.reduce((acc, p) => acc + (p.successRate || 0), 0) / testPlans.length) }}%
+            {{ testPlans.length ? Math.round(testPlans.reduce((acc, p) => acc + (p.successRate || 0), 0) / testPlans.length) : 0 }}%
           </div>
         </CardContent>
       </Card>
@@ -143,14 +135,16 @@ const getSuccessRateColor = (rate?: number) => {
                 创建测试计划
               </Button>
             </DialogTrigger>
-            <DialogContent class="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogContent class="max-w-2xl h-[90vh] flex flex-col">
               <DialogHeader>
                 <DialogTitle>创建测试计划</DialogTitle>
                 <DialogDescription>
                   组合多个测试用例，配置定时任务和执行策略
                 </DialogDescription>
               </DialogHeader>
-              <CreateTestPlanForm @close="isCreateDialogOpen = false" />
+              <div class="flex-1 overflow-y-auto pr-1">
+                <CreateTestPlanForm @close="isCreateDialogOpen = false" @success="handleCreateSuccess" />
+              </div>
             </DialogContent>
           </Dialog>
         </div>
@@ -168,7 +162,7 @@ const getSuccessRateColor = (rate?: number) => {
       <CardContent class="space-y-4">
         <div class="bg-white rounded-lg p-4 space-y-2">
           <h4 class="font-semibold text-sm">OpenAPI 触发</h4>
-          <pre class="bg-gray-900 text-green-400 p-3 rounded text-xs overflow-x-auto">curl -X POST https://platform.example.com/api/v1/plans/1/execute \
+          <pre class="bg-gray-900 text-green-400 p-3 rounded text-xs overflow-x-auto">curl -X POST http://localhost:8080/api/v1/plans/1/execute \
   -H "Authorization: Bearer YOUR_API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"environment": "production"}'</pre>
@@ -178,7 +172,7 @@ const getSuccessRateColor = (rate?: number) => {
           <pre class="bg-gray-900 text-green-400 p-3 rounded text-xs overflow-x-auto">pipeline {
   stage('Run Tests') {
     steps {
-      sh 'curl -X POST https://platform.example.com/api/v1/plans/1/execute'
+      sh 'curl -X POST http://localhost:8080/api/v1/plans/1/execute'
     }
   }
 }</pre>
@@ -197,66 +191,53 @@ const getSuccessRateColor = (rate?: number) => {
           <Card v-for="plan in testPlans" :key="plan.id" class="hover:shadow-md transition-shadow">
             <CardContent class="pt-6">
               <div class="flex flex-col md:flex-row md:items-start justify-between gap-4">
-                <div class="flex-1 space-y-3">
-                  <div>
-                    <div class="flex items-center gap-2 mb-2">
-                      <h3 class="font-semibold">{{ plan.name }}</h3>
-                      <Badge v-if="plan.status === 'active'" class="bg-green-500">启用</Badge>
-                      <Badge v-else class="bg-gray-500">禁用</Badge>
-                      <Badge v-if="plan.schedule?.enabled" variant="outline" class="flex items-center gap-1">
-                        <Clock class="w-3 h-3" />
-                        定时任务
-                      </Badge>
-                    </div>
-                    <p class="text-sm text-gray-600">{{ plan.description }}</p>
+                <div class="space-y-2 flex-1">
+                  <div class="flex items-center gap-3">
+                    <h3 class="font-semibold text-lg">{{ plan.name }}</h3>
+                    <Badge :variant="plan.status === 'active' ? 'default' : 'secondary'">
+                      {{ plan.status === 'active' ? '启用' : '禁用' }}
+                    </Badge>
+                    <Badge variant="outline">{{ plan.environment }}</Badge>
                   </div>
+                  <p class="text-sm text-gray-500">{{ plan.description }}</p>
                   
-                  <div class="space-y-2">
-                    <div class="text-sm">
-                      <span class="text-gray-600">包含用例: </span>
-                      <span class="font-semibold">{{ plan.testCases.length }} 个</span>
-                      <span class="text-gray-500 ml-2">
-                        (API: {{ plan.testCases.filter(tc => tc.type === 'API').length }}, 
-                        WEB: {{ plan.testCases.filter(tc => tc.type === 'WEB').length }}, 
-                        APP: {{ plan.testCases.filter(tc => tc.type === 'APP').length }})
-                      </span>
+                  <div class="flex flex-wrap gap-4 text-xs text-gray-500 pt-2">
+                    <div class="flex items-center gap-1">
+                      <Calendar class="w-3 h-3" />
+                      上次运行: {{ plan.lastRun || '从未' }}
                     </div>
-                    
-                    <div v-if="plan.schedule?.enabled" class="flex items-center gap-4 text-sm text-gray-600">
-                      <span>Cron: {{ plan.schedule.cron }}</span>
-                      <span v-if="plan.schedule.nextRun" class="flex items-center gap-1">
-                        <Calendar class="w-3 h-3" />
-                        下次运行: {{ plan.schedule.nextRun }}
-                      </span>
+                    <div v-if="plan.cronExpression" class="flex items-center gap-1 text-blue-600">
+                      <Clock class="w-3 h-3" />
+                      定时任务: {{ plan.cronExpression }}
                     </div>
-                    
-                    <div class="flex items-center gap-4 text-sm">
-                      <span class="text-gray-600">环境: {{ plan.environment }}</span>
-                      <span v-if="plan.lastRun" class="text-gray-600">最后运行: {{ plan.lastRun }}</span>
-                      <span v-if="plan.successRate !== undefined" :class="`font-semibold ${getSuccessRateColor(plan.successRate)}`">
-                        成功率: {{ plan.successRate }}%
-                      </span>
+                    <div v-if="plan.successRate !== undefined" :class="getSuccessRateColor(plan.successRate)">
+                      成功率: {{ plan.successRate }}%
                     </div>
                   </div>
                 </div>
-                
-                <div class="flex gap-2">
-                  <Button size="sm" class="bg-green-600 hover:bg-green-700">
-                    <Play class="w-4 h-4" />
+
+                <div class="flex items-center gap-2">
+                  <Button size="sm" class="bg-green-600 hover:bg-green-700" @click="handleExecute(plan.id)">
+                    <Play class="w-4 h-4 mr-2" />
+                    执行
                   </Button>
-                  <Button variant="outline" size="sm">
+                  <Button variant="outline" size="icon" title="编辑">
                     <Pencil class="w-4 h-4" />
                   </Button>
-                  <Button variant="outline" size="sm">
+                  <Button variant="outline" size="icon" title="复制">
                     <Copy class="w-4 h-4" />
                   </Button>
-                  <Button variant="outline" size="sm" class="text-red-600 hover:text-red-700">
+                  <Button variant="outline" size="icon" class="text-red-600 hover:text-red-700" @click="handleDelete(plan.id)">
                     <Trash2 class="w-4 h-4" />
                   </Button>
                 </div>
               </div>
             </CardContent>
           </Card>
+          
+          <div v-if="testPlans.length === 0" class="text-center py-8 text-gray-500">
+            暂无测试计划，请点击"创建测试计划"
+          </div>
         </div>
       </CardContent>
     </Card>

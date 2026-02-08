@@ -11,7 +11,7 @@ const emit = defineEmits<{
 
 const menuItems = [
   { id: 'dashboard', icon: Home, label: '工作台' },
-  { id: 'api', icon: Globe, label: 'API 测试' },
+  { id: 'api', icon: Globe, label: '测试用例' },
   { id: 'web-app', icon: Monitor, label: 'Web/App' },
   { id: 'plans', icon: CirclePlay, label: '测试计划' },
   { id: 'report', icon: FileText, label: '测试报告' },

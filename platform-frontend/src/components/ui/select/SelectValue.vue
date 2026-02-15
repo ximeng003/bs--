@@ -1,11 +1,17 @@
 <script setup lang="ts">
 import { inject, Ref, computed } from 'vue'
 
+const props = defineProps<{
+  placeholder?: string
+}>()
+
 const selectValue = inject<Ref<string>>('selectValue')
-const placeholder = inject<string>('placeholder', '')
 
 const displayValue = computed(() => {
-    return selectValue?.value || placeholder
+  if (selectValue && selectValue.value) {
+    return selectValue.value
+  }
+  return props.placeholder || ''
 })
 </script>
 

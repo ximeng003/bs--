@@ -69,6 +69,10 @@ cd /d "%~dp0platform-frontend"
 start "Platform Frontend" cmd /k "npm run dev"
 
 echo.
+echo [Opening Microsoft Edge]
+start "" msedge http://localhost:5173/
+
+echo.
 echo Both services are attempting to start in new windows.
 echo.
 pause

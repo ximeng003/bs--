@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
 import { Card } from '@/components/ui/card'
 import Button from '@/components/ui/button/Button.vue'
 import Input from '@/components/ui/input/Input.vue'
@@ -8,16 +8,22 @@ import Textarea from '@/components/ui/textarea/Textarea.vue'
 import Switch from '@/components/ui/switch/Switch.vue'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import request from '@/api/request'
+import { showToast } from '@/lib/notify'
+
+const props = defineProps<{
+  mode?: 'create' | 'edit'
+  plan?: any | null
+}>()
 
 const emit = defineEmits(['close', 'success'])
 
 const form = ref({
-    name: '',
-    description: '',
-    environment: 'dev',
-    testCaseIds: [] as string[],
-    scheduleEnabled: false,
-    cronExpression: ''
+  name: '',
+  description: '',
+  environment: 'dev',
+  testCaseIds: [] as string[],
+  scheduleEnabled: false,
+  cronExpression: ''
 })
 
 const testCases = ref<any[]>([])
@@ -27,41 +33,75 @@ const handleClose = () => {
 }
 
 const fetchTestCases = async () => {
-    try {
-        const res: any = await request.get('/testcases?size=100') // Fetch more
-        if (res && res.records) {
-            testCases.value = res.records
-        }
-    } catch (e) {
-        console.error(e)
+  try {
+    const res: any = await request.get('/testcases?size=100')
+    if (res && res.records) {
+      testCases.value = res.records
     }
+  } catch (e) {
+    console.error(e)
+  }
 }
 
+const resetFormFromPlan = () => {
+  if (props.mode === 'edit' && props.plan) {
+    form.value.name = props.plan.name || ''
+    form.value.description = props.plan.description || ''
+    form.value.environment = props.plan.environment || 'dev'
+    form.value.scheduleEnabled = !!props.plan.cronExpression
+    form.value.cronExpression = props.plan.cronExpression || ''
+  } else {
+    form.value.name = ''
+    form.value.description = ''
+    form.value.environment = 'dev'
+    form.value.testCaseIds = []
+    form.value.scheduleEnabled = false
+    form.value.cronExpression = ''
+  }
+}
+
+watch(
+  () => props.plan,
+  () => {
+    resetFormFromPlan()
+  },
+  { immediate: true }
+)
+
 onMounted(() => {
-    fetchTestCases()
+  fetchTestCases()
 })
 
+const submitLabel = computed(() => (props.mode === 'edit' ? '保存' : '创建计划'))
+
 const handleSubmit = async () => {
-    if (!form.value.name) {
-        alert('请输入计划名称')
-        return
+  if (!form.value.name) {
+    showToast('请输入计划名称', 'warning')
+    return
+  }
+
+  const payload: any = {
+    name: form.value.name,
+    description: form.value.description,
+    environment: form.value.environment,
+    cronExpression: form.value.scheduleEnabled ? form.value.cronExpression : null,
+    status: props.plan?.status || 'active'
+  }
+
+  try {
+    if (props.mode === 'edit' && props.plan && props.plan.id) {
+      await request.put('/plans', {
+        ...payload,
+        id: props.plan.id
+      })
+    } else {
+      await request.post('/plans', payload)
     }
-    
-    try {
-        await request.post('/plans', {
-            name: form.value.name,
-            description: form.value.description,
-            environment: form.value.environment,
-            cronExpression: form.value.scheduleEnabled ? form.value.cronExpression : null,
-            status: 'active'
-            // In a real app, we would save the testCaseIds association too.
-            // But TestPlan entity might need a ManyToMany relation.
-            // For now, we just save the plan.
-        })
-        emit('success')
-    } catch (e) {
-        alert('创建失败')
-    }
+    emit('success')
+    showToast(props.mode === 'edit' ? '保存成功' : '创建成功', 'success')
+  } catch (e) {
+    showToast(props.mode === 'edit' ? '保存失败' : '创建失败', 'error')
+  }
 }
 </script>
 
@@ -152,7 +192,7 @@ const handleSubmit = async () => {
         取消
       </Button>
       <Button @click="handleSubmit">
-        创建计划
+        {{ submitLabel }}
       </Button>
     </div>
   </div>

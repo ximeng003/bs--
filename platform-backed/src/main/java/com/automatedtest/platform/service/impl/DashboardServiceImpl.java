@@ -34,6 +34,7 @@ public class DashboardServiceImpl implements DashboardService {
         stats.setTotalCases(testCaseMapper.selectCount(null));
         stats.setPassedCases(testCaseMapper.selectCount(new QueryWrapper<TestCase>().eq("last_result", "success")));
         stats.setFailedCases(testCaseMapper.selectCount(new QueryWrapper<TestCase>().eq("last_result", "failed")));
+        stats.setTotalExecutions(testReportMapper.selectCount(null));
         
         Double avg = testReportMapper.getAvgDuration();
         stats.setAvgDuration(avg != null ? Math.round(avg * 100.0) / 100.0 : 0.0);
@@ -41,9 +42,10 @@ public class DashboardServiceImpl implements DashboardService {
         // 2. Daily Trend (Last 7 days)
         LocalDateTime startDate = LocalDateTime.now().minusDays(6).withHour(0).withMinute(0).withSecond(0);
         List<Map<String, Object>> dailyRaw = testReportMapper.getDailyStats(startDate);
-        
+
         List<DailyTrendDTO> dailyTrend = new ArrayList<>();
         Map<String, DailyTrendDTO> dateMap = new HashMap<>();
+        Map<String, long[]> perTypeCounters = new HashMap<>();
         
         // Init last 7 days
         for (int i = 0; i < 7; i++) {
@@ -52,6 +54,12 @@ public class DashboardServiceImpl implements DashboardService {
             dto.setDate(dateStr);
             dto.setPassed(0);
             dto.setFailed(0);
+            dto.setApiCount(0);
+            dto.setWebCount(0);
+            dto.setAppCount(0);
+            dto.setApiPassRate(0);
+            dto.setWebPassRate(0);
+            dto.setAppPassRate(0);
             dailyTrend.add(dto);
             dateMap.put(dateStr, dto);
         }
@@ -81,15 +89,54 @@ public class DashboardServiceImpl implements DashboardService {
             }
             
             String status = (String) record.get("status");
+            String type = (String) record.get("type");
             Number countNum = (Number) record.get("count");
             long count = countNum != null ? countNum.longValue() : 0;
             
             DailyTrendDTO dto = dateMap.get(dateStr);
             if (dto != null) {
-                if ("success".equals(status)) {
+                if ("success".equalsIgnoreCase(status)) {
                     dto.setPassed(dto.getPassed() + count);
                 } else {
                     dto.setFailed(dto.getFailed() + count);
+                }
+            }
+
+            if (type != null) {
+                String upperType = type.toUpperCase();
+                String key = dateStr + "|" + upperType;
+                long[] counters = perTypeCounters.computeIfAbsent(key, k -> new long[2]);
+                counters[0] += count;
+                if ("success".equalsIgnoreCase(status)) {
+                    counters[1] += count;
+                }
+            }
+        }
+
+        for (DailyTrendDTO dto : dailyTrend) {
+            String dateStr = dto.getDate();
+
+            long[] apiCounters = perTypeCounters.get(dateStr + "|API");
+            if (apiCounters != null) {
+                dto.setApiCount(apiCounters[0]);
+                if (apiCounters[0] > 0) {
+                    dto.setApiPassRate(Math.round((apiCounters[1] * 10000.0) / apiCounters[0]) / 100.0);
+                }
+            }
+
+            long[] webCounters = perTypeCounters.get(dateStr + "|WEB");
+            if (webCounters != null) {
+                dto.setWebCount(webCounters[0]);
+                if (webCounters[0] > 0) {
+                    dto.setWebPassRate(Math.round((webCounters[1] * 10000.0) / webCounters[0]) / 100.0);
+                }
+            }
+
+            long[] appCounters = perTypeCounters.get(dateStr + "|APP");
+            if (appCounters != null) {
+                dto.setAppCount(appCounters[0]);
+                if (appCounters[0] > 0) {
+                    dto.setAppPassRate(Math.round((appCounters[1] * 10000.0) / appCounters[0]) / 100.0);
                 }
             }
         }

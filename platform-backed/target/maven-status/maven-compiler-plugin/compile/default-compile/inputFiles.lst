@@ -24,6 +24,7 @@ C:\Users\hmh\Desktop\Automated Testing Platform\platform-backed\src\main\java\co
 C:\Users\hmh\Desktop\Automated Testing Platform\platform-backed\src\main\java\com\automatedtest\platform\dto\RecentActivityDTO.java
 C:\Users\hmh\Desktop\Automated Testing Platform\platform-backed\src\main\java\com\automatedtest\platform\service\impl\UserServiceImpl.java
 C:\Users\hmh\Desktop\Automated Testing Platform\platform-backed\src\main\java\com\automatedtest\platform\controller\TestPlanController.java
+C:\Users\hmh\Desktop\Automated Testing Platform\platform-backed\src\main\java\com\automatedtest\platform\dto\CaseExecuteResultDTO.java
 C:\Users\hmh\Desktop\Automated Testing Platform\platform-backed\src\main\java\com\automatedtest\platform\mapper\EnvironmentMapper.java
 C:\Users\hmh\Desktop\Automated Testing Platform\platform-backed\src\main\java\com\automatedtest\platform\service\EnvironmentService.java
 C:\Users\hmh\Desktop\Automated Testing Platform\platform-backed\src\main\java\com\automatedtest\platform\service\impl\TestCaseServiceImpl.java

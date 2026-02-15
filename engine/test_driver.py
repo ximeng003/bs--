@@ -2,6 +2,41 @@ import sys
 import json
 import time
 from typing import Any, Dict, Optional
+from unittest.mock import MagicMock
+
+# Patch broken selenium installation (missing modules)
+def patch_selenium():
+    modules_to_patch = [
+        "selenium.webdriver.firefox",
+        "selenium.webdriver.firefox.webdriver",
+        "selenium.webdriver.firefox.options",
+        "selenium.webdriver.firefox.service",
+        "selenium.webdriver.firefox.firefox_profile",
+        # "selenium.webdriver.edge",  <-- We now use Edge
+        # "selenium.webdriver.edge.webdriver",
+        # "selenium.webdriver.edge.options",
+        # "selenium.webdriver.edge.service",
+        "selenium.webdriver.ie",
+        "selenium.webdriver.ie.webdriver",
+        "selenium.webdriver.ie.options",
+        "selenium.webdriver.ie.service",
+        "selenium.webdriver.safari",
+        "selenium.webdriver.safari.webdriver",
+        "selenium.webdriver.safari.options",
+        "selenium.webdriver.safari.service",
+        "selenium.webdriver.webkitgtk",
+        "selenium.webdriver.webkitgtk.webdriver",
+        "selenium.webdriver.webkitgtk.options",
+        "selenium.webdriver.webkitgtk.service",
+        "selenium.webdriver.wpewebkit",
+        "selenium.webdriver.wpewebkit.webdriver",
+        "selenium.webdriver.wpewebkit.options",
+        "selenium.webdriver.wpewebkit.service",
+    ]
+    for m in modules_to_patch:
+        sys.modules[m] = MagicMock()
+
+patch_selenium()
 
 def success(result: Dict[str, Any]) -> Dict[str, Any]:
     return {
@@ -84,11 +119,41 @@ def run_api(content: Dict[str, Any]) -> Dict[str, Any]:
     return success(result)
 
 def run_web(content: Dict[str, Any]) -> Dict[str, Any]:
-    from selenium import webdriver
-    from selenium.webdriver.chrome.options import Options
+    # Switch to Edge Driver
+    from selenium.webdriver.edge.webdriver import WebDriver as EdgeDriver
+    from selenium.webdriver.edge.options import Options
+    from selenium.webdriver.edge.service import Service as EdgeService
+    from webdriver_manager.microsoft import EdgeChromiumDriverManager
+    import os
+    
     ops = Options()
     ops.add_argument("--headless=new")
-    driver = webdriver.Chrome(options=ops)
+    
+    driver_path = None
+    
+    # 1. Try local explicit path first (User provided path)
+    # Check for msedgedriver.exe in engine folder
+    local_driver_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "msedgedriver.exe")
+    if os.path.exists(local_driver_path):
+        driver_path = local_driver_path
+        
+    # 2. Try webdriver_manager to install matching EdgeDriver
+    if not driver_path:
+        try:
+            # Note: EdgeChromiumDriverManager might fail due to network in China
+            driver_path = EdgeChromiumDriverManager().install()
+        except Exception:
+            pass
+
+    service = EdgeService(executable_path=driver_path) if driver_path else None
+    
+    # If service is None (install failed and no path), standard init might fail but let's try
+    if service:
+        driver = EdgeDriver(service=service, options=ops)
+    else:
+        # Fallback to default (relies on PATH)
+        driver = EdgeDriver(options=ops)
+        
     start = time.time()
     logs = []
     try:

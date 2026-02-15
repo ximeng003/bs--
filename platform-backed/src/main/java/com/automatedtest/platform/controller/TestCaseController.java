@@ -30,9 +30,24 @@ public class TestCaseController {
 
     @GetMapping
     public Result<IPage<TestCase>> list(@RequestParam(defaultValue = "1") Integer page,
-                                        @RequestParam(defaultValue = "10") Integer size) {
+                                        @RequestParam(defaultValue = "10") Integer size,
+                                        @RequestParam(required = false) String keyword,
+                                        @RequestParam(required = false) String type,
+                                        @RequestParam(required = false, defaultValue = "updated") String sort) {
         Page<TestCase> pageParam = new Page<>(page, size);
-        return Result.success(testCaseService.page(pageParam));
+        com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<TestCase> qw = new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<>();
+        if (keyword != null && !keyword.trim().isEmpty()) {
+            qw.like("name", keyword.trim());
+        }
+        if (type != null && !type.trim().isEmpty()) {
+            qw.eq("type", type.trim());
+        }
+        if ("created".equalsIgnoreCase(sort)) {
+            qw.orderByDesc("created_at");
+        } else {
+            qw.orderByDesc("updated_at");
+        }
+        return Result.success(testCaseService.page(pageParam, qw));
     }
 
     @GetMapping("/{id}")
@@ -41,8 +56,12 @@ public class TestCaseController {
     }
 
     @PostMapping
-    public Result<Boolean> save(@RequestBody TestCase testCase) {
-        return Result.success(testCaseService.save(testCase));
+    public Result<Integer> save(@RequestBody TestCase testCase) {
+        boolean success = testCaseService.save(testCase);
+        if (success) {
+            return Result.success(testCase.getId());
+        }
+        return Result.error("Save failed");
     }
 
     @PutMapping
@@ -53,5 +72,12 @@ public class TestCaseController {
     @DeleteMapping("/{id}")
     public Result<Boolean> delete(@PathVariable Integer id) {
         return Result.success(testCaseService.removeById(id));
+    }
+
+    @DeleteMapping
+    public Result<Boolean> deleteAll() {
+        com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<TestCase> qw =
+                new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<>();
+        return Result.success(testCaseService.remove(qw));
     }
 }

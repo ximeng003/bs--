@@ -19,6 +19,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
+import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
@@ -112,7 +113,7 @@ public class TestCaseServiceImpl extends ServiceImpl<TestCaseMapper, TestCase> i
         }
         Map<String, Object> contentMap = new HashMap<>();
         String content = testCase.getContent();
-        if (content != null && !content.isBlank()) {
+        if (content != null && content.trim().length() > 0) {
             try {
                 contentMap = objectMapper.readValue(content, Map.class);
             } catch (Exception e) {
@@ -128,7 +129,7 @@ public class TestCaseServiceImpl extends ServiceImpl<TestCaseMapper, TestCase> i
         try {
             String input = objectMapper.writeValueAsString(payload);
             String pythonBin = System.getenv("PYTHON_BIN");
-            if (pythonBin == null || pythonBin.isBlank()) {
+            if (pythonBin == null || pythonBin.trim().length() == 0) {
                 pythonBin = "python";
             }
             Path enginePath = Paths.get(System.getProperty("user.dir")).resolve("..").resolve("engine").resolve("test_driver.py").normalize();
@@ -138,11 +139,18 @@ public class TestCaseServiceImpl extends ServiceImpl<TestCaseMapper, TestCase> i
             try (OutputStream os = process.getOutputStream()) {
                 os.write(input.getBytes(StandardCharsets.UTF_8));
             }
-            try (InputStream is = process.getInputStream()) {
-                output = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+            try (InputStream is = process.getInputStream();
+                 ByteArrayOutputStream buffer = new ByteArrayOutputStream()) {
+                int nRead;
+                byte[] data = new byte[1024];
+                while ((nRead = is.read(data, 0, data.length)) != -1) {
+                    buffer.write(data, 0, nRead);
+                }
+                buffer.flush();
+                output = new String(buffer.toByteArray(), StandardCharsets.UTF_8);
             }
             int exitCode = process.waitFor();
-            if (exitCode == 0 && output != null && !output.isBlank()) {
+            if (exitCode == 0 && output != null && output.trim().length() > 0) {
                 result = objectMapper.readValue(output, CaseExecuteResultDTO.class);
             } else {
                 result.setStatus("failed");

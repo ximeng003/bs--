@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { Card, CardContent } from '@/components/ui/card'
 import Button from '@/components/ui/button/Button.vue'
 import Input from '@/components/ui/input/Input.vue'
@@ -9,8 +9,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Play, Save, Clock } from 'lucide-vue-next'
 import request from '@/api/request'
+import { showToast } from '@/lib/notify'
 
 const route = useRoute()
+const router = useRouter()
 const caseId = ref<string | null>(null)
 const name = ref('New API Case')
 
@@ -85,11 +87,15 @@ const handleSave = async () => {
         if (caseId.value) {
             await request.put('/testcases', payload)
         } else {
-            await request.post('/testcases', payload)
+            const newId: any = await request.post('/testcases', payload)
+            if (newId) {
+                caseId.value = String(newId)
+            }
         }
-        alert('保存成功')
+        showToast('保存成功', 'success')
+        router.push('/api-cases')
     } catch (e) {
-        alert('保存失败')
+        showToast('保存失败', 'error')
     }
 }
 

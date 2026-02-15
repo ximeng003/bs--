@@ -7,6 +7,7 @@ import Input from '@/components/ui/input/Input.vue'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Play, Save, Copy, Code } from 'lucide-vue-next'
 import request from '@/api/request'
+import { showToast } from '@/lib/notify'
 
 const route = useRoute()
 
@@ -265,11 +266,18 @@ const handleSave = async () => {
         if (caseId.value) {
             await request.put('/testcases', payload)
         } else {
-            await request.post('/testcases', payload)
+            const newId: any = await request.post('/testcases', payload)
+            if (newId) {
+                caseId.value = String(newId)
+                // Update URL without reloading to keep state clean
+                const newUrl = new URL(window.location.href)
+                newUrl.searchParams.set('id', String(newId))
+                window.history.pushState({}, '', newUrl.toString())
+            }
         }
-        alert('保存成功')
+        showToast('保存成功', 'success')
     } catch (e) {
-        alert('保存失败')
+        showToast('保存失败', 'error')
     }
 }
 
@@ -333,7 +341,7 @@ const keywordGroups = computed(() => deviceType.value === 'app' ? appKeywords : 
 
 const handleExecute = async () => {
   if (!caseId.value) {
-    alert('请先保存用例')
+    showToast('请先保存用例', 'warning')
     return
   }
   isExecuting.value = true
@@ -342,9 +350,9 @@ const handleExecute = async () => {
     const res: any = await request.post(`/testcases/${caseId.value}/execute`)
     const logs = res?.logs ? String(res.logs).split('\n') : []
     executionLogs.value = logs.length ? logs : ['执行完成']
-    alert(res?.status === 'success' ? '执行成功' : (res?.error || '执行失败'))
+    showToast(res?.status === 'success' ? '执行成功' : (res?.error || '执行失败'), res?.status === 'success' ? 'success' : 'error')
   } catch (e: any) {
-    alert(e?.message || '执行失败')
+    showToast(e?.message || '执行失败', 'error')
   } finally {
     isExecuting.value = false
   }
@@ -352,7 +360,7 @@ const handleExecute = async () => {
 
 const handleCopyCode = () => {
     navigator.clipboard.writeText(scriptContent.value)
-    alert('代码已复制到剪贴板')
+    showToast('代码已复制到剪贴板', 'success')
 }
 </script>
 

@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import Badge from '@/components/ui/badge/Badge.vue'
 import { Plus, Trash2, Copy, Key, Globe, Database, Zap, Pencil } from 'lucide-vue-next'
 import request from '@/api/request'
+import { showToast, openConfirm } from '@/lib/notify'
 
 // Environment Settings
 interface Environment {
@@ -42,12 +43,18 @@ const handleEditEnv = (env: Environment) => {
 }
 
 const handleDeleteEnv = async (id: number) => {
-    if (!confirm('确定删除?')) return
+    const ok = await openConfirm({
+        title: '删除环境',
+        message: '确定要删除这个环境吗？此操作不可恢复。',
+        confirmText: '删除',
+    })
+    if (!ok) return
     try {
         await request.delete(`/environments/${id}`)
         fetchEnvironments()
+        showToast('删除成功', 'success')
     } catch (e) {
-        alert('删除失败')
+        showToast('删除失败', 'error')
     }
 }
 
@@ -67,7 +74,7 @@ const handleAddEnv = async () => {
         })
         fetchEnvironments()
     } catch (e) {
-        alert('创建失败')
+        showToast('创建失败', 'error')
     }
 }
 
@@ -141,6 +148,27 @@ const apiKeys = ref([
 
 const handleRevokeKey = (id: string) => {
   apiKeys.value = apiKeys.value.filter(key => key.id !== id)
+}
+
+const copyToClipboard = async (text: string) => {
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text)
+      showToast('复制成功', 'success')
+    } else {
+      const textarea = document.createElement('textarea')
+      textarea.value = text
+      textarea.style.position = 'fixed'
+      textarea.style.opacity = '0'
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textarea)
+      showToast('复制成功', 'success')
+    }
+  } catch (e) {
+    showToast('复制失败', 'error')
+  }
 }
 
 const handleGenerateKey = () => {
@@ -292,7 +320,12 @@ const handleAddVariable = () => {
               <div v-for="func in functions" :key="func.name" class="p-4 border border-gray-100 rounded-lg space-y-2">
                 <div class="flex items-center justify-between">
                   <code class="text-sm font-mono bg-gray-100 px-2 py-1 rounded text-purple-600">{{ func.name }}</code>
-                  <Button variant="ghost" size="icon" class="h-6 w-6">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    class="h-6 w-6"
+                    @click="copyToClipboard(func.name)"
+                  >
                     <Copy class="w-3 h-3" />
                   </Button>
                 </div>

@@ -30,13 +30,13 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true }
   },
   {
-    path: '/api-test',
+    path: '/api-cases',
     name: 'ApiTest',
     component: TestCaseManager,
     meta: { requiresAuth: true }
   },
   {
-    path: '/api-test/edit/:id?',
+    path: '/api-cases/edit/:id?',
     name: 'ApiCaseEditor',
     component: ApiCaseEditor,
     meta: { requiresAuth: true }

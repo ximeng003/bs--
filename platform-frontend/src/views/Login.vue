@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import request from '@/api/request'
 import { userStore } from '@/store/userStore'
+import { showToast } from '@/lib/notify'
 
 const router = useRouter()
 const isRegister = ref(false)
@@ -46,19 +47,23 @@ const handleSubmit = async () => {
         username: username.value,
         password: password.value
       })
-      alert('注册成功，请登录')
+      showToast('注册成功，请登录', 'success')
       toggleMode()
     } else {
       const res: any = await request.post('/auth/login', {
         username: username.value,
         password: password.value
       })
-      // Login success
       userStore.setUser(res)
       router.push('/')
     }
   } catch (e: any) {
-    error.value = (isRegister.value ? '注册失败: ' : '登录失败: ') + (e.message || '未知错误')
+    const msg = e?.message || ''
+    if (msg.includes('Network Error') || msg.includes('ECONNREFUSED') || msg.includes('500')) {
+      error.value = '登录失败：后端服务可能未启动，请先运行后台服务。'
+    } else {
+      error.value = (isRegister.value ? '注册失败: ' : '登录失败: ') + (msg || '未知错误')
+    }
   } finally {
     loading.value = false
   }

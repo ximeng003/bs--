@@ -16,6 +16,7 @@ const route = useRoute()
 
 interface ExecutionRecord {
   id: string;
+  displayIndex: number;
   planName: string; // or case name
   type: 'plan' | 'single';
   status: 'success' | 'failed' | 'running' | 'pending';
@@ -82,8 +83,10 @@ const fetchReports = async (skipDateValidation = false) => {
                 })
             }
             totalCount.value = records.length
-            executions.value = records.map((r: any) => ({
+            const indexOffset = (currentPage.value - 1) * pageSize.value
+            executions.value = records.map((r: any, idx: number) => ({
                 id: String(r.id),
+                displayIndex: indexOffset + idx + 1,
                 planName: r.planId ? `测试计划 #${r.planId}` : `测试用例 #${r.caseId}`,
                 type: r.planId ? 'plan' : 'single',
                 status: r.status,
@@ -301,7 +304,9 @@ const handleViewReport = (id: string) => {
                 :is="getStatusIcon(record.status)"
                 :class="`w-5 h-5 ${record.status === 'success' ? 'text-green-500' : record.status === 'failed' ? 'text-red-500' : 'text-blue-500'}`"
               />
-              <h3 class="font-semibold text-lg text-gray-900">{{ record.planName }}</h3>
+              <h3 class="font-semibold text-lg text-gray-900">
+                测试报告 #{{ record.displayIndex }} · {{ record.planName }}
+              </h3>
               <Badge :class="getStatusColor(record.status) + ' border'">
                 {{ record.status === 'success' ? '成功' : record.status === 'failed' ? '失败' : '执行中' }}
               </Badge>
@@ -317,7 +322,7 @@ const handleViewReport = (id: string) => {
 
           <div class="space-y-4">
             <div class="flex items-center gap-8 text-sm text-gray-600">
-              <div>ID: #{{ record.id }}</div>
+              <div>序号: #{{ record.displayIndex }}</div>
               <div>执行时间: {{ record.startTime }}</div>
               <div>环境: {{ record.environment }}</div>
               <div>执行人: {{ record.executor }}</div>

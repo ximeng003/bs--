@@ -1,57 +1,495 @@
 <script setup lang="ts">
+import { computed, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { Card, CardContent } from '@/components/ui/card'
 import Badge from '@/components/ui/badge/Badge.vue'
 import Button from '@/components/ui/button/Button.vue'
 import { CheckCircle, XCircle, Clock, Download, Share2, AlertCircle } from 'lucide-vue-next'
+import request from '@/api/request'
 
-const reportData = {
-  status: 'failed',
-  caseName: 'Web支付流程测试',
-  executionTime: '2026-01-02 15:30:25',
-  duration: '15.8s',
-  engine: '本地引擎-张三',
-  environment: 'staging',
-  totalSteps: 12,
-  passedSteps: 10,
-  failedSteps: 2
+type LogLevel = 'info' | 'success' | 'error'
+
+interface ReportDetail {
+  id: number
+  planId?: number | null
+  caseId?: number | null
+  caseName?: string | null
+  caseType?: string | null
+  status?: string | null
+  executionTime?: number | null
+  logs?: string | null
+  executedAt?: string | null
+  executedBy?: string | null
+  environment?: string | null
 }
 
-const executionSteps = [
-  { step: 1, action: '打开浏览器', status: 'success', time: '0.5s', details: 'Chrome 120.0.0' },
-  { step: 2, action: '访问URL: https://example.com/checkout', status: 'success', time: '1.2s', details: '页面加载成功' },
-  { step: 3, action: '等待元素: #product-list', status: 'success', time: '0.3s', details: '元素已出现' },
-  { step: 4, action: '点击元素: .add-to-cart', status: 'success', time: '0.2s', details: '商品已添加到购物车' },
-  { step: 5, action: '点击元素: .checkout-btn', status: 'success', time: '0.3s', details: '进入结算页面' },
-  { step: 6, action: '等待元素: #payment-form', status: 'success', time: '0.8s', details: '支付表单已加载' },
-  { step: 7, action: '输入文本: #card-number, 4111111111111111', status: 'success', time: '0.5s', details: '卡号输入完成' },
-  { step: 8, action: '输入文本: #cvv, 123', status: 'success', time: '0.2s', details: 'CVV输入完成' },
-  { step: 9, action: '点击元素: #submit-payment', status: 'success', time: '0.4s', details: '提交支付请求' },
-  { step: 10, action: '等待元素: .payment-result', status: 'success', time: '3.5s', details: '等待支付响应' },
-  { step: 11, action: '断言文本: .payment-status, 支付成功', status: 'failed', time: '0.1s', details: '期望: "支付成功", 实际: "支付处理中"', error: true },
-  { step: 12, action: '截图: payment_result.png', status: 'failed', time: '0.2s', details: '由于上一步失败，测试中止', error: true }
-]
+interface ConsoleLog {
+  time: string
+  level: LogLevel
+  message: string
+}
 
-const consoleLogs = [
-  { time: '15:30:25.123', level: 'info', message: '[TestEngine] 开始执行测试用例: Web支付流程测试' },
-  { time: '15:30:25.456', level: 'info', message: '[Browser] 启动Chrome浏览器...' },
-  { time: '15:30:26.001', level: 'success', message: '[Step 1] ✓ 打开浏览器' },
-  { time: '15:30:26.234', level: 'info', message: '[Navigator] 访问 https://example.com/checkout' },
-  { time: '15:30:27.456', level: 'success', message: '[Step 2] ✓ 访问URL成功' },
-  { time: '15:30:27.789', level: 'success', message: '[Step 3] ✓ 元素已找到: #product-list' },
-  { time: '15:30:28.012', level: 'success', message: '[Step 4] ✓ 点击成功: .add-to-cart' },
-  { time: '15:30:28.345', level: 'success', message: '[Step 5] ✓ 点击成功: .checkout-btn' },
-  { time: '15:30:29.123', level: 'success', message: '[Step 6] ✓ 支付表单已加载' },
-  { time: '15:30:29.678', level: 'success', message: '[Step 7] ✓ 卡号输入完成' },
-  { time: '15:30:29.890', level: 'success', message: '[Step 8] ✓ CVV输入完成' },
-  { time: '15:30:30.234', level: 'success', message: '[Step 9] ✓ 提交支付请求' },
-  { time: '15:30:33.789', level: 'success', message: '[Step 10] ✓ 支付响应已返回' },
-  { time: '15:30:33.890', level: 'error', message: '[Step 11] ✗ 断言失败: 文本不匹配' },
-  { time: '15:30:33.891', level: 'error', message: '[Assertion] 期望值: "支付成功"' },
-  { time: '15:30:33.892', level: 'error', message: '[Assertion] 实际值: "支付处理中"' },
-  { time: '15:30:34.001', level: 'error', message: '[TestEngine] 测试失败，中止执行' },
-  { time: '15:30:34.123', level: 'info', message: '[Browser] 关闭浏览器' },
-  { time: '15:30:34.234', level: 'info', message: '[TestEngine] 生成测试报告' }
-]
+interface ExecutionStep {
+  step: number
+  action: string
+  status: 'success' | 'failed'
+  time: string
+  details: string
+  error?: boolean
+}
+
+interface RawTestCase {
+  id: number
+  type?: string | null
+  content?: string | null
+  name?: string | null
+  description?: string | null
+  environment?: string | null
+}
+
+const route = useRoute()
+const report = ref<ReportDetail | null>(null)
+const testCase = ref<RawTestCase | null>(null)
+
+const parsedCaseContent = computed(() => {
+  if (!testCase.value || !testCase.value.content) {
+    return null as unknown
+  }
+  const raw = String(testCase.value.content).trim()
+  if (!raw) {
+    return null as unknown
+  }
+  try {
+    return JSON.parse(raw) as unknown
+  } catch {
+    return raw as unknown
+  }
+})
+
+const logLines = computed(() => {
+  if (!report.value || !report.value.logs) {
+    return [] as string[]
+  }
+  return String(report.value.logs)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+})
+
+const consoleLogs = computed<ConsoleLog[]>(() => {
+  if (!logLines.value.length) {
+    return []
+  }
+  return logLines.value.map((line, index) => {
+    const lower = line.toLowerCase()
+    let level: LogLevel = 'info'
+    if (/(error|失败|异常|fail)/i.test(lower)) {
+      level = 'error'
+    } else if (/(success|成功|pass|通过|ok)/i.test(lower)) {
+      level = 'success'
+    }
+    return {
+      time: `${index + 1}`.padStart(2, '0'),
+      level,
+      message: line
+    }
+  })
+})
+
+const apiErrorText = computed(() => {
+  const lines = logLines.value
+  if (!lines.length) {
+    return ''
+  }
+  const found = lines.find((line) => /assert/i.test(line)) || ''
+  return found
+})
+
+function applyStepStatuses(
+  steps: ExecutionStep[],
+  executedCount: number,
+  isSuccess: boolean
+): ExecutionStep[] {
+  if (!steps.length) {
+    return steps
+  }
+  if (isSuccess) {
+    return steps.map((s) => ({
+      ...s,
+      status: 'success',
+      error: false
+    }))
+  }
+  const total = steps.length
+  const executed = Math.max(0, Math.min(executedCount, total))
+  const failIndex = executed < total ? executed : total - 1
+  return steps.map((s, idx) => {
+    if (idx < executed) {
+      return {
+        ...s,
+        status: 'success',
+        error: false
+      }
+    }
+    if (idx === failIndex) {
+      return {
+        ...s,
+        status: 'failed',
+        error: true
+      }
+    }
+    return {
+      ...s,
+      status: 'failed',
+      error: false
+    }
+  })
+}
+
+function buildApiSteps(
+  content: any,
+  isSuccess: boolean,
+  errorText: string
+): ExecutionStep[] {
+  const steps: ExecutionStep[] = []
+  if (!content || typeof content !== 'object') {
+    return steps
+  }
+  const method = String((content.method || 'GET') as string).toUpperCase()
+  const url = String(content.url || '')
+  let index = 1
+  steps.push({
+    step: index++,
+    action: `发送请求 ${method} ${url}`,
+    status: 'success',
+    time: '',
+    details: `Method: ${method} URL: ${url}`,
+    error: false
+  })
+  const assertions = Array.isArray(content.assertions)
+    ? content.assertions
+    : []
+  const activeAssertions = assertions.filter(
+    (a: any) => a && a.active !== false
+  )
+  assertions.forEach((a: any) => {
+    if (!a || (a.active === false)) {
+      return
+    }
+    const t = String(a.type || '').toLowerCase()
+    if (t === 'status') {
+      const expected = a.value
+      steps.push({
+        step: index++,
+        action: '断言状态码',
+        status: 'success',
+        time: '',
+        details: `期望状态码 = ${expected}`,
+        error: false
+      })
+    } else if (t === 'json') {
+      const path = a.path
+      const expected = a.value
+      steps.push({
+        step: index++,
+        action: '断言 JSON 字段',
+        status: 'success',
+        time: '',
+        details: `路径 ${path} = ${JSON.stringify(expected)}`,
+        error: false
+      })
+    }
+  })
+  if (isSuccess || !activeAssertions.length) {
+    return steps.map((s) => ({
+      ...s,
+      status: 'success',
+      error: false
+    }))
+  }
+  let failIndex = -1
+  const lower = errorText.toLowerCase()
+  if (lower.startsWith('status assert failed')) {
+    const match = errorText.match(/expected\s+(\d+)/i)
+    const expected = match ? match[1] : null
+    if (expected != null) {
+      activeAssertions.forEach((a: any, idx: number) => {
+        if (
+          String((a.type || '')).toLowerCase() === 'status' &&
+          String(a.value) === expected &&
+          failIndex < 0
+        ) {
+          failIndex = 1 + idx
+        }
+      })
+    }
+  } else if (lower.startsWith('json assert failed at')) {
+    const match = errorText.match(/at\s+(.+)$/i)
+    const path = match ? match[1].trim() : ''
+    if (path) {
+      activeAssertions.forEach((a: any, idx: number) => {
+        if (
+          String((a.type || '')).toLowerCase() === 'json' &&
+          String(a.path || '') === path &&
+          failIndex < 0
+        ) {
+          failIndex = 1 + idx
+        }
+      })
+    }
+  } else if (lower.startsWith('json assert error')) {
+    activeAssertions.forEach((a: any, idx: number) => {
+      if (
+        String((a.type || '')).toLowerCase() === 'json' &&
+        failIndex < 0
+      ) {
+        failIndex = 1 + idx
+      }
+    })
+  } else if (lower.startsWith('time assert failed')) {
+    activeAssertions.forEach((a: any, idx: number) => {
+      if (
+        String((a.type || '')).toLowerCase() === 'time' &&
+        failIndex < 0
+      ) {
+        failIndex = 1 + idx
+      }
+    })
+  }
+  if (failIndex < 0) {
+    failIndex = steps.length - 1
+  }
+  return steps.map((s, idx) => {
+    if (idx < failIndex) {
+      return {
+        ...s,
+        status: 'success',
+        error: false
+      }
+    }
+    if (idx === failIndex) {
+      return {
+        ...s,
+        status: 'failed',
+        error: true
+      }
+    }
+    return {
+      ...s,
+      status: 'failed',
+      error: false
+    }
+  })
+}
+
+function buildWebSteps(
+  content: unknown,
+  executedCount: number,
+  isSuccess: boolean
+): ExecutionStep[] {
+  let script = ''
+  if (typeof content === 'string') {
+    script = content
+  } else if (content && typeof content === 'object') {
+    const anyContent = content as any
+    if (typeof anyContent.script === 'string') {
+      script = anyContent.script
+    }
+  }
+  const lines = script
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+  const steps: ExecutionStep[] = lines.map((line, idx) => {
+    const original = line
+    let action = ''
+    let details = ''
+    if (line.startsWith('打开URL:')) {
+      const url = line.split(':', 1)[0] ? line.split(':', 2)[1] || '' : ''
+      action = '打开页面'
+      details = url.trim()
+    } else if (line.startsWith('刷新页面')) {
+      action = '刷新页面'
+      details = ''
+    } else if (/click\(/i.test(line) || line.startsWith('点击元素') || /点击/i.test(line)) {
+      action = '点击元素'
+      details = line
+    } else if (/input/i.test(line) || /send_keys/i.test(line) || /输入/.test(line)) {
+      action = '输入文本'
+      details = line
+    } else if (/assert/i.test(line) || /断言/.test(line)) {
+      action = '断言'
+      details = line
+    } else if (/wait/i.test(line) || /sleep/i.test(line) || /等待/.test(line)) {
+      action = '等待'
+      details = line
+    } else {
+      action = original.length > 40 ? `${original.slice(0, 40)}...` : original
+      details = original
+    }
+    return {
+      step: idx + 1,
+      action,
+      status: 'success',
+      time: '',
+      details: details || action,
+      error: false
+    }
+  })
+  return applyStepStatuses(steps, executedCount, isSuccess)
+}
+
+function buildAppSteps(
+  content: unknown,
+  executedCount: number,
+  isSuccess: boolean
+): ExecutionStep[] {
+  if (!content || typeof content !== 'object') {
+    return []
+  }
+  const anyContent = content as any
+  const rawSteps = Array.isArray(anyContent.steps) ? anyContent.steps : []
+  const steps: ExecutionStep[] = rawSteps.map((s: any, idx: number) => {
+    const actionType = String(s?.action || '').toLowerCase()
+    const by = s?.by ? String(s.by) : ''
+    const value =
+      s?.value || s?.selector || s?.xpath || s?.path || s?.file || s?.name || ''
+    const text = s?.text ? String(s.text) : ''
+    let action = ''
+    let details = ''
+    if (actionType === 'click') {
+      action = '点击元素'
+      details = value ? `${by || 'selector'}: ${value}` : ''
+    } else if (actionType === 'input') {
+      action = '输入文本'
+      details = text ? `输入 "${text}"` : ''
+    } else if (actionType === 'wait') {
+      action = '等待元素'
+      const ms = s?.ms != null ? Number(s.ms) : 1000
+      details = `等待 ${ms} ms`
+    } else if (actionType === 'back') {
+      action = '返回'
+    } else if (actionType === 'launch') {
+      action = '启动应用'
+    } else if (actionType === 'close') {
+      action = '关闭应用'
+    } else if (actionType === 'screenshot') {
+      action = '截图'
+      details = value ? String(value) : 'screenshot.png'
+    } else if (actionType === 'assert_exists') {
+      action = '断言元素存在'
+      details = value ? `${by || 'selector'}: ${value}` : ''
+    } else {
+      action = actionType || '步骤'
+    }
+    const detailText = details || action
+    return {
+      step: idx + 1,
+      action,
+      status: 'success',
+      time: '',
+      details: detailText,
+      error: false
+    }
+  })
+  return applyStepStatuses(steps, executedCount, isSuccess)
+}
+
+const executionSteps = computed<ExecutionStep[]>(() => {
+  const r = report.value
+  const tc = testCase.value
+  const caseType = (tc?.type || r?.caseType || '').toUpperCase()
+  const status = (r?.status || '').toLowerCase()
+  const isSuccess = status === 'success'
+  const executedCount = logLines.value.length
+
+  if (caseType === 'API') {
+    const content = parsedCaseContent.value
+    return buildApiSteps(content as any, isSuccess, apiErrorText.value)
+  }
+
+  if (caseType === 'WEB') {
+    const content = parsedCaseContent.value
+    return buildWebSteps(content, executedCount, isSuccess)
+  }
+
+  if (caseType === 'APP') {
+    const content = parsedCaseContent.value
+    return buildAppSteps(content, executedCount, isSuccess)
+  }
+
+  if (!consoleLogs.value.length) {
+    return []
+  }
+  return consoleLogs.value.map((log, index) => ({
+    step: index + 1,
+    action: log.message,
+    status: log.level === 'error' ? 'failed' : 'success',
+    time: '',
+    details: log.message,
+    error: log.level === 'error'
+  }))
+})
+
+const reportData = computed(() => {
+  const r = report.value
+  const status = r?.status || 'failed'
+  const caseName =
+    r?.caseName || (r?.caseId ? `测试用例 #${r.caseId}` : '测试报告')
+  const executionTime = r?.executedAt
+    ? String(r.executedAt).replace('T', ' ')
+    : ''
+  const duration =
+    typeof r?.executionTime === 'number' && r.executionTime >= 0
+      ? `${r.executionTime}ms`
+      : '-'
+  const engine = r?.executedBy || 'System'
+  const environment = r?.environment || ''
+
+  const totalSteps =
+    executionSteps.value.length > 0 ? executionSteps.value.length : 1
+  const failedSteps = executionSteps.value.filter(
+    (item) => item.status === 'failed'
+  ).length
+  const passedSteps =
+    totalSteps - failedSteps >= 0 ? totalSteps - failedSteps : 0
+
+  return {
+    status,
+    caseName,
+    executionTime,
+    duration,
+    engine,
+    environment,
+    totalSteps,
+    passedSteps,
+    failedSteps
+  }
+})
+
+const fetchReport = async () => {
+  const id = route.params.id as string
+  if (!id) {
+    return
+  }
+  try {
+    const res = await request.get(`/reports/${id}`)
+    const detail = res as ReportDetail
+    report.value = detail
+    if (detail.caseId) {
+      try {
+        const caseRes = await request.get(`/testcases/${detail.caseId}`)
+        testCase.value = caseRes as RawTestCase
+      } catch (e) {
+        console.error(e)
+      }
+    }
+  } catch (e) {
+    console.error(e)
+  }
+}
+
+onMounted(fetchReport)
 </script>
 
 <template>

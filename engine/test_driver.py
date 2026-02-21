@@ -79,10 +79,20 @@ def run_api(content: Dict[str, Any]) -> Dict[str, Any]:
     for p in content.get("params") or []:
         if p.get("active", True) and p.get("key"):
             params[p["key"]] = p.get("value")
-    body = content.get("body") or ""
+
+    body = content.get("body")
+    json_body = None
+    if isinstance(body, (dict, list)):
+        json_body = body
+        body = None
+    else:
+        body = body or ""
 
     start = time.time()
-    resp = requests.request(method, url, headers=headers, params=params, data=body)
+    if json_body is not None:
+        resp = requests.request(method, url, headers=headers, params=params, json=json_body)
+    else:
+        resp = requests.request(method, url, headers=headers, params=params, data=body)
     duration = int((time.time() - start) * 1000)
 
     result = {
@@ -277,7 +287,12 @@ def run_app(content: Dict[str, Any]) -> Dict[str, Any]:
 
 def main():
     raw = sys.stdin.read()
-    payload = json.loads(raw)
+    try:
+        payload = json.loads(raw)
+    except Exception as e:
+        result = failed(f"invalid payload: {e}", {"logs": raw})
+        print(json.dumps(result, ensure_ascii=False))
+        return
     typ = payload.get("type")
     content = payload.get("content") or {}
     try:

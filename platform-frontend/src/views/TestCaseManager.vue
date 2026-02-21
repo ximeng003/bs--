@@ -16,6 +16,7 @@ const router = useRouter()
 
 interface TestCase {
   id: string;
+  displayIndex?: number;
   name: string;
   type: 'API' | 'WEB' | 'APP';
   description: string;
@@ -36,6 +37,21 @@ const storedSort = typeof window !== 'undefined' ? localStorage.getItem(SORT_STO
 const sortMode = ref<'created' | 'updated'>(storedSort === 'created' ? 'created' : 'updated')
 const editDialogOpen = ref(false)
 const editingCase = ref<TestCase | null>(null)
+const logDialogOpen = ref(false)
+const logDialogTitle = ref('')
+const logDialogMessage = ref('')
+const logDialogDetail = ref('')
+
+const simplifyError = (raw: string | undefined | null): string => {
+  if (!raw) return '执行失败'
+  if (/invalid payload/i.test(raw)) {
+    return '执行引擎收到的 JSON 格式不合法，请检查请求 Body 格式'
+  }
+  const firstLine = raw.split('\n')[0] || raw
+  const cutIndex = firstLine.indexOf(' at [Source')
+  const base = cutIndex > 0 ? firstLine.slice(0, cutIndex) : firstLine
+  return base.length > 160 ? base.slice(0, 160) + '…' : base
+}
 
 const pageSizeStr = ref('10')
 const currentPage = ref(1)
@@ -62,15 +78,19 @@ const fetchTestCases = async () => {
     })
     if (res && res.records) {
       totalCount.value = typeof res.total === 'number' ? res.total : res.records.length
-      testCases.value = res.records.map((r: any) => ({
+      const indexOffset = (currentPage.value - 1) * pageSize.value
+      testCases.value = res.records.map((r: any, idx: number) => ({
         ...r,
+        displayIndex: indexOffset + idx + 1,
         createdAt: r.createdAt || r.created_at || r.createdAtStr || r.created || '',
         updatedAt: r.updatedAt || r.updated_at || r.updatedAtStr || r.updated || ''
       }))
     } else if (Array.isArray(res)) {
       totalCount.value = res.length
-      testCases.value = res.map((r: any) => ({
+      const indexOffset = (currentPage.value - 1) * pageSize.value
+      testCases.value = res.map((r: any, idx: number) => ({
         ...r,
+        displayIndex: indexOffset + idx + 1,
         createdAt: r.createdAt || r.created_at || r.createdAtStr || r.created || '',
         updatedAt: r.updatedAt || r.updated_at || r.updatedAtStr || r.updated || ''
       }))
@@ -145,17 +165,56 @@ const handleDeleteAll = async () => {
 }
 
 const handleRun = async (id: string) => {
-    try {
-        const res: any = await request.post(`/testcases/${id}/execute`)
-        await fetchTestCases()
-        if (res?.status === 'success') {
-            showToast('执行成功', 'success')
-        } else {
-            showToast(res?.error || '执行失败', 'error')
+  try {
+    const res: any = await request.post(`/testcases/${id}/execute`)
+    await fetchTestCases()
+    if (res?.status === 'success') {
+      showToast('执行成功', 'success')
+      const resp = res?.response || {}
+      const statusCode = resp.statusCode ?? resp.status ?? ''
+      const duration = res?.durationMs ?? ''
+      const titleParts: string[] = []
+      if (statusCode !== '') {
+        titleParts.push(`状态码 ${statusCode}`)
+      }
+      if (duration !== '') {
+        titleParts.push(`耗时 ${duration} ms`)
+      }
+      logDialogTitle.value = titleParts.length ? `执行成功（${titleParts.join('，')}）` : '执行成功'
+      logDialogMessage.value = ''
+      const logs = typeof res?.logs === 'string' ? res.logs : ''
+      let bodyPreview = ''
+      if (resp && typeof resp.body === 'string' && resp.body) {
+        let pretty = resp.body
+        const trimmed = resp.body.trim()
+        if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+          try {
+            const parsed = JSON.parse(resp.body)
+            pretty = JSON.stringify(parsed, null, 2)
+          } catch {
+          }
         }
-    } catch (e: any) {
-        showToast(e?.message || '执行失败', 'error')
+        bodyPreview = pretty.length > 2000 ? pretty.slice(0, 2000) + '\n...（已截断）' : pretty
+      }
+      logDialogDetail.value = logs || bodyPreview || '执行成功，无额外日志'
+      logDialogOpen.value = true
+    } else {
+      const msg = simplifyError(res?.error)
+      showToast('执行失败', 'error')
+      logDialogTitle.value = '执行失败'
+      logDialogMessage.value = msg
+      const rawError = typeof res?.error === 'string' ? res.error : ''
+      const logs = typeof res?.logs === 'string' ? res.logs : ''
+      logDialogDetail.value = logs || rawError
+      logDialogOpen.value = true
     }
+  } catch (e: any) {
+    showToast('执行失败', 'error')
+    logDialogTitle.value = '执行异常'
+    logDialogMessage.value = '后端返回错误，请查看下方详细日志'
+    logDialogDetail.value = e?.response?.data || e?.message || ''
+    logDialogOpen.value = true
+  }
 }
 
 const navigateToEditor = (id: string, type: string) => {
@@ -278,6 +337,34 @@ const getTypeBadgeClass = (type: string) => {
 
 <template>
   <div class="space-y-6 p-6">
+    <Dialog v-model:open="logDialogOpen">
+      <DialogContent class="sm:max-w-[520px]">
+        <DialogHeader>
+          <DialogTitle>{{ logDialogTitle || '执行日志' }}</DialogTitle>
+        </DialogHeader>
+        <div class="mt-4 space-y-4 max-w-[420px] mx-auto">
+          <div v-if="logDialogMessage">
+            <div class="text-xs text-gray-500 mb-1">错误信息</div>
+            <div
+              class="rounded-md border border-red-200 bg-red-50 text-xs text-red-800 p-3 max-h-[140px] overflow-y-auto whitespace-pre-wrap break-all"
+            >
+              {{ logDialogMessage }}
+            </div>
+          </div>
+          <div>
+            <div class="text-xs text-gray-500 mb-1">日志输出</div>
+            <div
+              class="bg-gray-900 text-green-400 rounded-md p-3 text-xs font-mono max-h-[260px] overflow-y-auto whitespace-pre-wrap"
+            >
+              {{ logDialogDetail || '暂无日志' }}
+            </div>
+          </div>
+        </div>
+        <div class="flex justify-end mt-4 max-w-[420px] mx-auto">
+          <Button @click="logDialogOpen = false">关闭</Button>
+        </div>
+      </DialogContent>
+    </Dialog>
     <Dialog v-model:open="editDialogOpen">
       <DialogContent class="sm:max-w-[425px]">
         <DialogHeader>
@@ -417,7 +504,7 @@ const getTypeBadgeClass = (type: string) => {
                 </div>
                 <p class="text-sm text-gray-500">{{ testCase.description }}</p>
                 <div class="flex items-center gap-4 text-xs text-gray-400 mt-2">
-                  <span>ID: {{ testCase.id }}</span>
+                  <span>序号: #{{ testCase.displayIndex ?? (Number(testCase.id) || 0) }}</span>
                   <span v-if="testCase.lastRun">最后运行: {{ testCase.lastRun }}</span>
                   <span v-if="testCase.createdAt">创建时间: {{ fmtTime(testCase.createdAt) }}</span>
                   <span v-if="testCase.updatedAt">更新时间: {{ fmtTime(testCase.updatedAt) }}</span>

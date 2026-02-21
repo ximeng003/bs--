@@ -116,6 +116,19 @@ public class TestCaseServiceImpl extends ServiceImpl<TestCaseMapper, TestCase> i
         if (content != null && content.trim().length() > 0) {
             try {
                 contentMap = objectMapper.readValue(content, Map.class);
+                if ("API".equalsIgnoreCase(testCase.getType())) {
+                    Object bodyObj = contentMap.get("body");
+                    if (bodyObj instanceof String) {
+                        String bodyStr = ((String) bodyObj).trim();
+                        if (bodyStr.startsWith("{") || bodyStr.startsWith("[")) {
+                            try {
+                                Object bodyJson = objectMapper.readValue(bodyStr, Object.class);
+                                contentMap.put("body", bodyJson);
+                            } catch (Exception ignored) {
+                            }
+                        }
+                    }
+                }
             } catch (Exception e) {
                 contentMap.put("script", content);
             }
@@ -174,7 +187,18 @@ public class TestCaseServiceImpl extends ServiceImpl<TestCaseMapper, TestCase> i
         if (result.getDurationMs() != null) {
             report.setExecutionTime(result.getDurationMs().intValue());
         }
-        report.setLogs(result.getLogs() != null ? result.getLogs() : output);
+        String logsToSave = result.getLogs();
+        if (logsToSave == null || logsToSave.trim().isEmpty()) {
+            logsToSave = output;
+        }
+        if (result.getError() != null && !result.getError().trim().isEmpty()) {
+            if (logsToSave == null || logsToSave.trim().isEmpty()) {
+                logsToSave = result.getError();
+            } else {
+                logsToSave = logsToSave + System.lineSeparator() + result.getError();
+            }
+        }
+        report.setLogs(logsToSave);
         report.setExecutedBy("System");
         testReportService.save(report);
 

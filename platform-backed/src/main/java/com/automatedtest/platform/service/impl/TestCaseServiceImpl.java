@@ -103,7 +103,17 @@ public class TestCaseServiceImpl extends ServiceImpl<TestCaseMapper, TestCase> i
     }
 
     @Override
-    public CaseExecuteResultDTO executeCaseById(Integer id) {
+    public CaseExecuteResultDTO executeCaseById(Integer id, String executedBy) {
+        return executeCaseById(id, executedBy, null);
+    }
+
+    @Override
+    public CaseExecuteResultDTO executeCaseById(Integer id, String executedBy, Integer planId) {
+        return executeCaseById(id, executedBy, planId, null);
+    }
+
+    @Override
+    public CaseExecuteResultDTO executeCaseById(Integer id, String executedBy, Integer planId, Integer planRunNo) {
         CaseExecuteResultDTO result = new CaseExecuteResultDTO();
         TestCase testCase = getById(id);
         if (testCase == null) {
@@ -111,6 +121,11 @@ public class TestCaseServiceImpl extends ServiceImpl<TestCaseMapper, TestCase> i
             result.setError("测试用例不存在");
             return result;
         }
+        return executeCaseInternal(testCase, executedBy, planId, planRunNo);
+    }
+
+    private CaseExecuteResultDTO executeCaseInternal(TestCase testCase, String executedBy, Integer planId, Integer planRunNo) {
+        CaseExecuteResultDTO result = new CaseExecuteResultDTO();
         Map<String, Object> contentMap = new HashMap<>();
         String content = testCase.getContent();
         if (content != null && content.trim().length() > 0) {
@@ -182,6 +197,12 @@ public class TestCaseServiceImpl extends ServiceImpl<TestCaseMapper, TestCase> i
         updateById(testCase);
 
         TestReport report = new TestReport();
+        if (planId != null) {
+            report.setPlanId(planId);
+        }
+        if (planRunNo != null && planRunNo > 0) {
+            report.setPlanRunNo(planRunNo);
+        }
         report.setCaseId(testCase.getId());
         report.setStatus(success ? "success" : "failed");
         if (result.getDurationMs() != null) {
@@ -199,8 +220,16 @@ public class TestCaseServiceImpl extends ServiceImpl<TestCaseMapper, TestCase> i
             }
         }
         report.setLogs(logsToSave);
-        report.setExecutedBy("System");
+        report.setExecutedAt(LocalDateTime.now());
+        if (executedBy != null && !executedBy.trim().isEmpty()) {
+            report.setExecutedBy(executedBy.trim());
+        } else {
+            report.setExecutedBy("System");
+        }
         testReportService.save(report);
+        if (report.getId() != null) {
+            result.setReportId(report.getId());
+        }
 
         return result;
     }

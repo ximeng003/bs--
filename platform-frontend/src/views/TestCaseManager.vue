@@ -42,6 +42,20 @@ const logDialogTitle = ref('')
 const logDialogMessage = ref('')
 const logDialogDetail = ref('')
 
+const formatEnvironment = (env: string) => {
+  if (!env) return ''
+  switch (env) {
+    case 'dev':
+      return '开发环境'
+    case 'staging':
+      return '测试环境'
+    case 'production':
+      return '生产环境'
+    default:
+      return env
+  }
+}
+
 const simplifyError = (raw: string | undefined | null): string => {
   if (!raw) return '执行失败'
   if (/invalid payload/i.test(raw)) {
@@ -79,21 +93,35 @@ const fetchTestCases = async () => {
     if (res && res.records) {
       totalCount.value = typeof res.total === 'number' ? res.total : res.records.length
       const indexOffset = (currentPage.value - 1) * pageSize.value
-      testCases.value = res.records.map((r: any, idx: number) => ({
+      const mapped = res.records.map((r: any, idx: number) => ({
         ...r,
         displayIndex: indexOffset + idx + 1,
         createdAt: r.createdAt || r.created_at || r.createdAtStr || r.created || '',
         updatedAt: r.updatedAt || r.updated_at || r.updatedAtStr || r.updated || ''
       }))
+      const sorted = [...mapped].sort((a, b) => {
+        const key = sortMode.value === 'created' ? 'createdAt' : 'updatedAt'
+        const ta = new Date(String(a[key as 'createdAt' | 'updatedAt'] || '')).getTime() || 0
+        const tb = new Date(String(b[key as 'createdAt' | 'updatedAt'] || '')).getTime() || 0
+        return tb - ta
+      })
+      testCases.value = sorted
     } else if (Array.isArray(res)) {
       totalCount.value = res.length
       const indexOffset = (currentPage.value - 1) * pageSize.value
-      testCases.value = res.map((r: any, idx: number) => ({
+      const mapped = res.map((r: any, idx: number) => ({
         ...r,
         displayIndex: indexOffset + idx + 1,
         createdAt: r.createdAt || r.created_at || r.createdAtStr || r.created || '',
         updatedAt: r.updatedAt || r.updated_at || r.updatedAtStr || r.updated || ''
       }))
+      const sorted = [...mapped].sort((a, b) => {
+        const key = sortMode.value === 'created' ? 'createdAt' : 'updatedAt'
+        const ta = new Date(String(a[key as 'createdAt' | 'updatedAt'] || '')).getTime() || 0
+        const tb = new Date(String(b[key as 'createdAt' | 'updatedAt'] || '')).getTime() || 0
+        return tb - ta
+      })
+      testCases.value = sorted
     } else {
       totalCount.value = 0
       testCases.value = []
@@ -496,7 +524,7 @@ const getTypeBadgeClass = (type: string) => {
                     {{ testCase.type }}
                   </Badge>
                   <Badge v-if="testCase.environment" variant="outline" class="text-xs">
-                    {{ testCase.environment }}
+                    {{ formatEnvironment(testCase.environment) }}
                   </Badge>
                   <Badge v-if="testCase.lastResult" :class="getResultBadgeColor(testCase.lastResult) + ' text-white border-0'">
                     {{ getResultText(testCase.lastResult) }}

@@ -16,8 +16,7 @@ const route = useRoute()
 
 interface ExecutionRecord {
   id: string;
-  displayIndex: number;
-  planName: string; // or case name
+  planName: string;
   type: 'plan' | 'single';
   status: 'success' | 'failed' | 'running' | 'pending';
   startTime: string;
@@ -29,11 +28,14 @@ interface ExecutionRecord {
   engine: string;
   environment: string;
   executor: string;
+  caseType?: string;
 }
 
 const executions = ref<ExecutionRecord[]>([])
 const keyword = ref('')
 const statusFilter = ref('all')
+const envFilter = ref('all')
+const caseTypeFilter = ref('all')
 const dateFilter = ref<string>('')
 const dateInputKey = ref(0)
 const loading = ref(false)
@@ -42,6 +44,20 @@ const pageSizeOptions = ['10', '50', '100']
 const currentPage = ref(1)
 const totalCount = ref(0)
 const selectedIds = ref<string[]>([])
+
+const formatEnvironment = (env: string) => {
+  if (!env) return ''
+  switch (env) {
+    case 'dev':
+      return '开发环境'
+    case 'staging':
+      return '测试环境'
+    case 'production':
+      return '生产环境'
+    default:
+      return env
+  }
+}
 
 const pageSize = computed(() => Number(pageSizeStr.value) || 10)
 
@@ -82,23 +98,73 @@ const fetchReports = async (skipDateValidation = false) => {
                     return executedDate === targetDate
                 })
             }
-            totalCount.value = records.length
-            const indexOffset = (currentPage.value - 1) * pageSize.value
-            executions.value = records.map((r: any, idx: number) => ({
-                id: String(r.id),
-                displayIndex: indexOffset + idx + 1,
-                planName: r.planId ? `测试计划 #${r.planId}` : `测试用例 #${r.caseId}`,
-                type: r.planId ? 'plan' : 'single',
-                status: r.status,
-                startTime: r.executedAt,
-                duration: r.executionTime ? `${r.executionTime}ms` : '-',
-                totalCases: 1,
-                passedCases: r.status === 'success' ? 1 : 0,
-                failedCases: r.status === 'failed' ? 1 : 0,
-                engine: 'Server',
-                environment: 'production',
-                executor: r.executedBy || 'System'
-            }))
+
+            const caseInfoMap: Record<string, { name?: string; type?: string; lastRun?: string }> = {}
+            const caseIds: number[] = []
+            records.forEach((r: any) => {
+                if (r.caseId != null) {
+                    const idNum = Number(r.caseId)
+                    if (!Number.isNaN(idNum) && !caseIds.includes(idNum)) {
+                        caseIds.push(idNum)
+                    }
+                }
+            })
+            if (caseIds.length > 0) {
+                try {
+                    const responses = await Promise.allSettled(
+                        caseIds.map(id => request.get(`/testcases/${id}`))
+                    )
+                    responses.forEach((resItem, idx) => {
+                        if (resItem.status === 'fulfilled' && resItem.value) {
+                            const id = caseIds[idx]
+                            const data = resItem.value as any
+                            caseInfoMap[String(id)] = {
+                                name: data.name,
+                                type: data.type,
+                                lastRun: data.lastRun || data.last_run || ''
+                            }
+                        }
+                    })
+                } catch (e) {
+                    console.error(e)
+                }
+            }
+
+            totalCount.value = typeof (res as any).total === 'number' ? Number((res as any).total) : records.length
+            executions.value = records.map((r: any) => {
+                const idStr = String(r.id)
+                const caseIdKey = r.caseId != null ? String(r.caseId) : ''
+                const isPlan = !!r.planId
+                const caseInfo = caseIdKey ? caseInfoMap[caseIdKey] : undefined
+                const caseNameFromBackend = r.caseName && String(r.caseName).trim().length > 0 ? String(r.caseName) : ''
+                const caseNameFromApi = !isPlan && caseInfo && caseInfo.name && String(caseInfo.name).trim().length > 0
+                  ? String(caseInfo.name)
+                  : ''
+                const planName =
+                  isPlan
+                    ? (r.planName || `测试计划 #${r.planId}`)
+                    : (caseNameFromBackend || caseNameFromApi || `测试用例 #${r.caseId}`)
+                const caseTypeRaw = r.caseType || (caseInfo && caseInfo.type) || ''
+                const caseType = String(caseTypeRaw || '').toUpperCase()
+                const executedAt = r.executedAt || r.executed_at || (caseInfo && caseInfo.lastRun) || r.lastRun || ''
+                const executedBy = r.executedBy || r.executed_by || 'System'
+
+                return {
+                    id: idStr,
+                    planName,
+                    type: isPlan ? 'plan' : 'single',
+                    status: r.status,
+                    startTime: executedAt ? String(executedAt).replace('T', ' ') : '',
+                    duration: typeof r.executionTime === 'number' && r.executionTime >= 0 ? `${r.executionTime}ms` : '-',
+                    totalCases: 1,
+                    passedCases: r.status === 'success' ? 1 : 0,
+                    failedCases: r.status === 'failed' ? 1 : 0,
+                    engine: 'Server',
+                    environment: r.environment || '未设置',
+                    executor: executedBy,
+                    caseType: caseType || '未知类型'
+                }
+            })
             selectedIds.value = []
         } else {
              totalCount.value = 0
@@ -203,6 +269,36 @@ onMounted(() => {
     fetchReports()
 })
 
+const environmentOptions = computed(() => {
+  const set = new Set<string>()
+  executions.value.forEach(r => {
+    if (r.environment && r.environment !== '未设置') {
+      set.add(r.environment)
+    }
+  })
+  return Array.from(set)
+})
+
+const caseTypeOptions = computed(() => {
+  const set = new Set<string>()
+  executions.value.forEach(r => {
+    if (r.caseType) {
+      set.add(String(r.caseType).toUpperCase())
+    }
+  })
+  return Array.from(set)
+})
+
+const filteredExecutions = computed(() => {
+  return executions.value.filter(r => {
+    const envOk = envFilter.value === 'all' || r.environment === envFilter.value
+    const typeOk =
+      caseTypeFilter.value === 'all' ||
+      String(r.caseType || '').toUpperCase() === caseTypeFilter.value
+    return envOk && typeOk
+  })
+})
+
 const getStatusColor = (status: string) => {
   switch (status) {
     case 'success': return 'text-green-600 bg-green-50 border-green-200'
@@ -223,6 +319,16 @@ const getStatusIcon = (status: string) => {
 
 const handleViewReport = (id: string) => {
     router.push(`/reports/${id}`)
+}
+
+const getCaseTypeBadgeClass = (type: string) => {
+  const upper = String(type || '').toUpperCase()
+  const colors: Record<string, string> = {
+    API: 'bg-blue-100 text-blue-800 border-blue-200',
+    WEB: 'bg-purple-100 text-purple-800 border-purple-200',
+    APP: 'bg-green-100 text-green-800 border-green-200'
+  }
+  return colors[upper] || 'bg-gray-50 text-gray-600 border-gray-200'
 }
 </script>
 
@@ -247,7 +353,7 @@ const handleViewReport = (id: string) => {
           <span class="text-xs text-gray-400">格式：YYYY-MM-DD</span>
         </div>
         <Select v-model="statusFilter">
-          <SelectTrigger class="w-[180px]">
+          <SelectTrigger class="w-[150px]">
             <SelectValue placeholder="所有状态" />
           </SelectTrigger>
           <SelectContent>
@@ -255,6 +361,38 @@ const handleViewReport = (id: string) => {
             <SelectItem value="success">执行成功</SelectItem>
             <SelectItem value="failed">执行失败</SelectItem>
             <SelectItem value="running">执行中</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select v-model="envFilter">
+          <SelectTrigger class="w-[150px]">
+            <span style="pointer-events: none;">
+              {{ envFilter === 'all' ? '所有环境' : formatEnvironment(envFilter) }}
+            </span>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">所有环境</SelectItem>
+            <SelectItem
+              v-for="env in environmentOptions"
+              :key="env"
+              :value="env"
+            >
+              {{ formatEnvironment(env) }}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+        <Select v-model="caseTypeFilter">
+          <SelectTrigger class="w-[150px]">
+            <SelectValue placeholder="所有类型" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">所有类型</SelectItem>
+            <SelectItem
+              v-for="t in caseTypeOptions"
+              :key="t"
+              :value="t"
+            >
+              {{ t }}
+            </SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -290,7 +428,7 @@ const handleViewReport = (id: string) => {
 
     <!-- Execution List -->
     <div class="space-y-4">
-      <Card v-for="record in executions" :key="record.id" class="hover:shadow-md transition-shadow">
+      <Card v-for="record in filteredExecutions" :key="record.id" class="hover:shadow-md transition-shadow">
         <CardContent class="p-6">
           <div class="flex items-center justify-between mb-4">
             <div class="flex items-center gap-3">
@@ -305,10 +443,16 @@ const handleViewReport = (id: string) => {
                 :class="`w-5 h-5 ${record.status === 'success' ? 'text-green-500' : record.status === 'failed' ? 'text-red-500' : 'text-blue-500'}`"
               />
               <h3 class="font-semibold text-lg text-gray-900">
-                测试报告 #{{ record.displayIndex }} · {{ record.planName }}
+                {{ record.planName }}
               </h3>
               <Badge :class="getStatusColor(record.status) + ' border'">
                 {{ record.status === 'success' ? '成功' : record.status === 'failed' ? '失败' : '执行中' }}
+              </Badge>
+              <Badge
+                v-if="record.caseType"
+                :class="getCaseTypeBadgeClass(record.caseType) + ' text-xs'"
+              >
+                {{ String(record.caseType).toUpperCase() }}
               </Badge>
               <Badge variant="outline" class="text-xs">
                 {{ record.type === 'plan' ? '计划' : '单例' }}
@@ -322,9 +466,7 @@ const handleViewReport = (id: string) => {
 
           <div class="space-y-4">
             <div class="flex items-center gap-8 text-sm text-gray-600">
-              <div>序号: #{{ record.displayIndex }}</div>
-              <div>执行时间: {{ record.startTime }}</div>
-              <div>环境: {{ record.environment }}</div>
+              <div>环境: {{ formatEnvironment(record.environment) }}</div>
               <div>执行人: {{ record.executor }}</div>
               <div v-if="record.status !== 'running'">
                 通过率: {{ Math.round((record.passedCases / record.totalCases) * 100) }}%

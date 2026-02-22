@@ -4,6 +4,7 @@ import ApiCaseEditor from '@/views/ApiCaseEditor.vue'
 import ScriptEditor from '@/views/ScriptEditor.vue'
 import ReportDetail from '@/views/ReportDetail.vue'
 import TestPlanManager from '@/views/TestPlanManager.vue'
+import PlanReportView from '@/views/PlanReportView.vue'
 import Settings from '@/views/Settings.vue'
 import TestCaseManager from '@/views/TestCaseManager.vue'
 import ExecutionHistory from '@/views/ExecutionHistory.vue'
@@ -51,6 +52,12 @@ const routes: RouteRecordRaw[] = [
     path: '/plans',
     name: 'TestPlans',
     component: TestPlanManager,
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/plan-reports',
+    name: 'PlanReports',
+    component: PlanReportView,
     meta: { requiresAuth: true }
   },
   {

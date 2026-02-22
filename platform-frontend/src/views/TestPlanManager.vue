@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import Button from '@/components/ui/button/Button.vue'
 import Badge from '@/components/ui/badge/Badge.vue'
@@ -27,6 +28,7 @@ interface TestPlan {
   successRate?: number
 }
 
+const router = useRouter()
 const testPlans = ref<TestPlan[]>([])
 const isCreateDialogOpen = ref(false)
 const isEditDialogOpen = ref(false)
@@ -131,14 +133,24 @@ const handleDeleteAll = async () => {
 }
 
 const handleExecute = async (id: string) => {
-    const plan = testPlans.value.find(item => item.id === id)
-    const planName = plan?.name || id
-    showToast('开始执行计划 ' + planName, 'info')
-    const now = new Date().toLocaleString('zh-CN', { hour12: false })
+  const plan = testPlans.value.find(item => item.id === id)
+  const planName = plan?.name || id
+  showToast('开始执行计划 ' + planName, 'info')
+  try {
+    const res: any = await request.post(`/plans/${id}/execute`)
+    const nowStr = new Date().toLocaleString('zh-CN', { hour12: false })
     if (plan) {
-        plan.lastRun = now
+      plan.lastRun = nowStr
     }
-    // await request.post(`/plans/${id}/execute`)
+    if (res && typeof res.planSummaryReportId === 'number') {
+      router.push({ path: `/reports/${res.planSummaryReportId}` })
+    } else {
+      showToast('执行完成，但未返回计划报告 ID', 'warning')
+    }
+  } catch (e) {
+    console.error(e)
+    showToast('执行计划失败', 'error')
+  }
 }
 
 const handleEditPlan = (plan: TestPlan) => {
@@ -169,7 +181,7 @@ const handleDuplicatePlan = async (plan: TestPlan) => {
 }
 
 const handleCopyPlan = async (plan: TestPlan) => {
-  const text = `curl -X POST http://localhost:8080/api/plans/${plan.id}/execute`
+  const text = `curl -X POST http://localhost:18080/api/plans/${plan.id}/execute`
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       await navigator.clipboard.writeText(text)
@@ -344,17 +356,16 @@ const getSuccessRateColor = (rate?: number) => {
       <CardContent class="space-y-4">
         <div class="bg-white rounded-lg p-4 space-y-2">
           <h4 class="font-semibold text-sm">OpenAPI 触发</h4>
-          <pre class="bg-gray-900 text-green-400 p-3 rounded text-xs overflow-x-auto">curl -X POST http://localhost:8080/api/v1/plans/1/execute \
-  -H "Authorization: Bearer YOUR_API_TOKEN" \
+          <pre class="bg-gray-900 text-green-400 p-3 rounded text-xs overflow-x-auto">curl -X POST http://localhost:18080/api/plans/1/execute \
   -H "Content-Type: application/json" \
-  -d '{"environment": "production"}'</pre>
+  -d '{"planId": 1}'</pre>
         </div>
         <div class="bg-white rounded-lg p-4 space-y-2">
           <h4 class="font-semibold text-sm">Jenkins 集成示例</h4>
           <pre class="bg-gray-900 text-green-400 p-3 rounded text-xs overflow-x-auto">pipeline {
   stage('Run Tests') {
     steps {
-      sh 'curl -X POST http://localhost:8080/api/v1/plans/1/execute'
+      sh 'curl -X POST http://localhost:18080/api/plans/1/execute'
     }
   }
 }</pre>

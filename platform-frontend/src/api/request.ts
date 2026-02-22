@@ -10,9 +10,17 @@ request.interceptors.request.use(
   config => {
     const userStr = localStorage.getItem('user')
     if (userStr) {
-      // If using JWT, add token here. For now, we just proceed.
-      // const user = JSON.parse(userStr)
-      // config.headers['Authorization'] = `Bearer ${user.token}`
+      try {
+        const parsed = JSON.parse(userStr)
+        const user = parsed && parsed.username ? parsed : (parsed.data || parsed)
+        if (user && user.username) {
+          if (!config.headers) {
+            config.headers = {} as any
+          }
+          ;(config.headers as any)['X-User-Name'] = user.username
+        }
+      } catch {
+      }
     }
     return config
   },

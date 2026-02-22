@@ -11,6 +11,8 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
+import javax.servlet.http.HttpServletRequest;
+
 @RestController
 @RequestMapping("/api/testcases")
 public class TestCaseController {
@@ -24,8 +26,9 @@ public class TestCaseController {
     }
     
     @PostMapping("/{id}/execute")
-    public Result<CaseExecuteResultDTO> executeById(@PathVariable Integer id) {
-        return Result.success(testCaseService.executeCaseById(id));
+    public Result<CaseExecuteResultDTO> executeById(@PathVariable Integer id, HttpServletRequest request) {
+        String executedBy = request.getHeader("X-User-Name");
+        return Result.success(testCaseService.executeCaseById(id, executedBy));
     }
 
     @GetMapping

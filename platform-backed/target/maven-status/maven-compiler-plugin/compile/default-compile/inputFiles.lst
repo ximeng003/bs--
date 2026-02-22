@@ -2,6 +2,7 @@ C:\Users\hmh\Desktop\Automated Testing Platform\platform-backed\src\main\java\co
 C:\Users\hmh\Desktop\Automated Testing Platform\platform-backed\src\main\java\com\automatedtest\platform\service\impl\TestReportServiceImpl.java
 C:\Users\hmh\Desktop\Automated Testing Platform\platform-backed\src\main\java\com\automatedtest\platform\controller\EnvironmentController.java
 C:\Users\hmh\Desktop\Automated Testing Platform\platform-backed\src\main\java\com\automatedtest\platform\controller\DashboardController.java
+C:\Users\hmh\Desktop\Automated Testing Platform\platform-backed\src\main\java\com\automatedtest\platform\dto\ReportDetailDTO.java
 C:\Users\hmh\Desktop\Automated Testing Platform\platform-backed\src\main\java\com\automatedtest\platform\PlatformApplication.java
 C:\Users\hmh\Desktop\Automated Testing Platform\platform-backed\src\main\java\com\automatedtest\platform\dto\DashboardStatsDTO.java
 C:\Users\hmh\Desktop\Automated Testing Platform\platform-backed\src\main\java\com\automatedtest\platform\entity\TestPlan.java

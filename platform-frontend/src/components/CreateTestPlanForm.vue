@@ -50,6 +50,15 @@ const resetFormFromPlan = () => {
     form.value.environment = props.plan.environment || 'dev'
     form.value.scheduleEnabled = !!props.plan.cronExpression
     form.value.cronExpression = props.plan.cronExpression || ''
+    const rawIds = props.plan.testCaseIds || props.plan.test_case_ids || ''
+    if (rawIds) {
+      form.value.testCaseIds = String(rawIds)
+        .split(',')
+        .map((s: string) => s.trim())
+        .filter((s: string) => s.length > 0)
+    } else {
+      form.value.testCaseIds = []
+    }
   } else {
     form.value.name = ''
     form.value.description = ''
@@ -84,6 +93,7 @@ const handleSubmit = async () => {
     name: form.value.name,
     description: form.value.description,
     environment: form.value.environment,
+    testCaseIds: form.value.testCaseIds.join(','),
     cronExpression: form.value.scheduleEnabled ? form.value.cronExpression : null,
     status: props.plan?.status || 'active'
   }

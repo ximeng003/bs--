@@ -50,6 +50,7 @@ CREATE TABLE test_plans (
     status VARCHAR(20) DEFAULT 'active',
     cron_expression VARCHAR(50),
     environment VARCHAR(50),
+    test_case_ids TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -58,6 +59,7 @@ CREATE TABLE test_plans (
 CREATE TABLE test_reports (
     id INT AUTO_INCREMENT PRIMARY KEY,
     plan_id INT,
+    plan_run_no INT, -- 第几次执行同一个计划，从 1 开始
     case_id INT, -- If run individually
     status VARCHAR(20), -- success, failed
     execution_time INT, -- in ms

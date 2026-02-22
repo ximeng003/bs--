@@ -1,17 +1,24 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { Card, CardContent } from '@/components/ui/card'
 import Badge from '@/components/ui/badge/Badge.vue'
 import Button from '@/components/ui/button/Button.vue'
 import { CheckCircle, XCircle, Clock, Download, Share2, AlertCircle } from 'lucide-vue-next'
+import { use } from 'echarts/core'
+import { CanvasRenderer } from 'echarts/renderers'
+import { PieChart } from 'echarts/charts'
+import { TooltipComponent, LegendComponent } from 'echarts/components'
+import VChart from 'vue-echarts'
 import request from '@/api/request'
 
+use([CanvasRenderer, PieChart, TooltipComponent, LegendComponent])
 type LogLevel = 'info' | 'success' | 'error'
 
 interface ReportDetail {
   id: number
   planId?: number | null
+  planRunNo?: number | null
   caseId?: number | null
   caseName?: string | null
   caseType?: string | null
@@ -21,6 +28,27 @@ interface ReportDetail {
   executedAt?: string | null
   executedBy?: string | null
   environment?: string | null
+}
+
+interface PlanItemForReport {
+  reportId: number
+  caseId?: number | null
+  caseName?: string | null
+  caseType?: string | null
+  status?: string | null
+  durationMs?: number | null
+}
+
+interface PlanSummaryForReport {
+  planId: number
+  planName?: string | null
+  environment?: string | null
+  total: number
+  success: number
+  failed: number
+  durationMs: number
+  avgDurationMs: number
+  items: PlanItemForReport[]
 }
 
 interface ConsoleLog {
@@ -47,9 +75,31 @@ interface RawTestCase {
   environment?: string | null
 }
 
+const formatDuration = (ms?: number | null) => {
+  if (ms == null) return '-'
+  if (ms < 1000) return `${ms} ms`
+  return `${(ms / 1000).toFixed(2)} s`
+}
+
 const route = useRoute()
+const router = useRouter()
 const report = ref<ReportDetail | null>(null)
 const testCase = ref<RawTestCase | null>(null)
+const planSummary = ref<PlanSummaryForReport | null>(null)
+
+const formatEnvironment = (env: string | null | undefined) => {
+  if (!env) return ''
+  switch (env) {
+    case 'dev':
+      return '开发环境'
+    case 'staging':
+      return '测试环境'
+    case 'production':
+      return '生产环境'
+    default:
+      return env
+  }
+}
 
 const parsedCaseContent = computed(() => {
   if (!testCase.value || !testCase.value.content) {
@@ -444,7 +494,7 @@ const reportData = computed(() => {
       ? `${r.executionTime}ms`
       : '-'
   const engine = r?.executedBy || 'System'
-  const environment = r?.environment || ''
+  const environment = formatEnvironment(r?.environment || '')
 
   const totalSteps =
     executionSteps.value.length > 0 ? executionSteps.value.length : 1
@@ -467,18 +517,118 @@ const reportData = computed(() => {
   }
 })
 
+const planSuccessRate = computed(() => {
+  const data = planSummary.value
+  if (!data || !data.total) return 0
+  return Math.round((data.success * 10000) / data.total) / 100
+})
+
+const planPieOption = computed(() => {
+  const data = planSummary.value
+  const success = data?.success || 0
+  const failed = data?.failed || 0
+  return {
+    tooltip: {
+      trigger: 'item'
+    },
+    legend: {
+      orient: 'horizontal',
+      bottom: 0,
+      left: 'center',
+      data: ['通过', '失败']
+    },
+    series: [
+      {
+        name: '用例结果',
+        type: 'pie',
+        radius: ['55%', '80%'],
+        center: ['50%', '42%'],
+        avoidLabelOverlap: true,
+        label: {
+          show: false,
+          position: 'center'
+        },
+        labelLine: {
+          show: false
+        },
+        data: [
+          { value: success, name: '通过' },
+          { value: failed, name: '失败' }
+        ]
+      }
+    ]
+  }
+})
+
+const planItems = computed(() => {
+  return planSummary.value?.items || []
+})
+
 const fetchReport = async () => {
   const id = route.params.id as string
   if (!id) {
     return
   }
   try {
-    const res = await request.get(`/reports/${id}`)
+    const res: any = await request.get(`/reports/${id}`)
     const detail = res as ReportDetail
     report.value = detail
+    if (detail.planId && detail.planRunNo) {
+      try {
+        const pageRes: any = await request.get('/reports', {
+          params: { page: 1, size: 1000, planId: detail.planId, planRunNo: detail.planRunNo }
+        })
+        const records = (pageRes && pageRes.records) ? pageRes.records as any[] : []
+        if (records.length > 0) {
+          let total = 0
+          let successCount = 0
+          let failedCount = 0
+          let totalDuration = 0
+          const items: PlanItemForReport[] = []
+          records.forEach((r: any) => {
+            if (!r || r.caseId == null) {
+              return
+            }
+            total++
+            const status = String(r.status || '').toLowerCase()
+            if (status === 'success') {
+              successCount++
+            } else {
+              failedCount++
+            }
+            if (typeof r.executionTime === 'number') {
+              totalDuration += r.executionTime
+            }
+            items.push({
+              reportId: r.id,
+              caseId: r.caseId,
+              caseName: r.caseName || null,
+              caseType: r.caseType || null,
+              status: r.status || null,
+              durationMs: typeof r.executionTime === 'number' ? r.executionTime : null
+            })
+          })
+          if (total > 0) {
+            planSummary.value = {
+              planId: detail.planId as number,
+              planName: records[0].planName || null,
+              environment: records[0].environment || null,
+              total,
+              success: successCount,
+              failed: failedCount,
+              durationMs: totalDuration,
+              avgDurationMs: total > 0 ? Math.round(totalDuration / total) : 0,
+              items
+            }
+          }
+        }
+      } catch (e) {
+        console.error(e)
+      }
+    }
     if (detail.caseId) {
       try {
-        const caseRes = await request.get(`/testcases/${detail.caseId}`)
+        const caseRes: any = await request.get(`/testcases/${detail.caseId}`)
         testCase.value = caseRes as RawTestCase
       } catch (e) {
         console.error(e)
@@ -490,12 +640,145 @@ const fetchReport = async () => {
 }
 
 onMounted(fetchReport)
+
+const goBackToReports = () => {
+  router.push('/reports')
+}
 </script>
 
 <template>
   <div class="p-6 space-y-6">
-    <!-- Report Header -->
-    <Card class="border-gray-200">
+    <div class="mb-2">
+      <Button
+        variant="outline"
+        size="sm"
+        class="flex items-center gap-1"
+        @click="goBackToReports"
+      >
+        <span>←</span>
+        <span>返回测试报告页面</span>
+      </Button>
+    </div>
+    <Card v-if="planSummary && report?.planId" class="border-gray-200">
+      <CardContent class="pt-6">
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-3">
+            <h2 class="text-xl font-semibold text-gray-900">
+              测试计划执行报告
+            </h2>
+            <Badge variant="outline" class="text-xs">
+              计划 ID: {{ planSummary.planId }}
+            </Badge>
+            <Badge v-if="planSummary.planName" variant="outline" class="text-xs">
+              {{ planSummary.planName }}
+            </Badge>
+            <Badge v-if="report?.planRunNo" variant="outline" class="text-xs">
+              第 {{ report?.planRunNo }} 次执行报告
+            </Badge>
+            <Badge v-if="planSummary.environment" variant="outline" class="text-xs">
+              环境: {{ formatEnvironment(planSummary.environment || '') }}
+            </Badge>
+          </div>
+          <div class="flex gap-2">
+            <Button variant="outline" size="sm" class="border-gray-300">
+              <Download class="w-4 h-4 mr-2" />
+              导出报告
+            </Button>
+            <Button variant="outline" size="sm" class="border-gray-300">
+              <Share2 class="w-4 h-4 mr-2" />
+              分享
+            </Button>
+          </div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
+          <div class="flex justify-center">
+            <div class="relative w-40 h-40">
+              <VChart :option="planPieOption" autoresize class="w-40 h-40" />
+              <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                <div class="text-xs text-gray-500">通过率</div>
+                <div class="text-2xl font-semibold text-gray-900">
+                  {{ planSuccessRate }}%
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="space-y-2">
+            <div class="flex items-center gap-2 text-sm">
+              <CheckCircle class="w-4 h-4 text-green-500" />
+              <span class="text-gray-600">通过用例：</span>
+              <span class="font-semibold text-green-700">{{ planSummary.success }}</span>
+              <span class="text-xs text-gray-400">
+                ({{ planSummary.total ? Math.round((planSummary.success * 10000) / planSummary.total) / 100 : 0 }}%)
+              </span>
+            </div>
+            <div class="flex items-center gap-2 text-sm">
+              <XCircle class="w-4 h-4 text-red-500" />
+              <span class="text-gray-600">失败用例：</span>
+              <span class="font-semibold text-red-700">{{ planSummary.failed }}</span>
+            </div>
+            <div class="flex items-center gap-2 text-sm">
+              <Clock class="w-4 h-4 text-gray-500" />
+              <span class="text-gray-600">总耗时：</span>
+              <span class="font-semibold text-gray-900">{{ formatDuration(planSummary.durationMs) }}</span>
+            </div>
+            <div class="flex items-center gap-2 text-sm">
+              <span class="text-gray-600">平均单用例耗时：</span>
+              <span class="font-semibold text-gray-900">{{ formatDuration(planSummary.avgDurationMs) }}</span>
+            </div>
+          </div>
+          <div class="space-y-2 text-sm text-gray-600">
+            <div>已执行用例数：<span class="font-semibold text-gray-900">{{ planSummary.total }}</span></div>
+            <div>执行人：<span class="font-semibold text-gray-900">{{ report?.executedBy || '当前登录用户' }}</span></div>
+          </div>
+        </div>
+        <div class="mt-6">
+          <div class="grid grid-cols-12 text-xs text-gray-500 border-b border-gray-100 pb-2">
+            <div class="col-span-1">序号</div>
+            <div class="col-span-4">用例名称 / ID</div>
+            <div class="col-span-2">类型</div>
+            <div class="col-span-2">状态</div>
+            <div class="col-span-3">耗时</div>
+          </div>
+          <div
+            v-for="(item, index) in planItems"
+            :key="item.reportId || index"
+            class="grid grid-cols-12 items-center text-sm py-2 border-b border-gray-50"
+          >
+            <div class="col-span-1 text-xs text-gray-500">
+              {{ index + 1 }}
+            </div>
+            <div class="col-span-4">
+              <div class="text-gray-900 truncate">
+                {{ item.caseName || `用例 #${item.caseId}` }}
+              </div>
+              <div class="text-xs text-gray-400">
+                ID: {{ item.caseId || '-' }}
+              </div>
+            </div>
+            <div class="col-span-2">
+              <Badge variant="outline" class="text-xs">
+                {{ (item.caseType || '未知').toUpperCase() }}
+              </Badge>
+            </div>
+            <div class="col-span-2">
+              <span
+                class="inline-flex items-center px-2 py-0.5 rounded-full border text-xs"
+                :class="String(item.status || '').toLowerCase() === 'success'
+                  ? 'text-green-700 bg-green-50 border-green-200'
+                  : 'text-red-700 bg-red-50 border-red-200'"
+              >
+                {{ String(item.status || '').toLowerCase() === 'success' ? '通过' : '失败' }}
+              </span>
+            </div>
+            <div class="col-span-3">
+              {{ formatDuration(item.durationMs) }}
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+
+    <Card v-else class="border-gray-200">
       <CardContent class="pt-6">
         <div class="flex items-start justify-between mb-6">
           <div>
@@ -532,7 +815,6 @@ onMounted(fetchReport)
           </div>
         </div>
 
-        <!-- Statistics -->
         <div class="grid grid-cols-4 gap-4 p-4 bg-gray-50 rounded-lg">
           <div class="text-center">
             <div class="text-2xl font-semibold text-gray-900">{{ reportData.totalSteps }}</div>
@@ -556,7 +838,7 @@ onMounted(fetchReport)
       </CardContent>
     </Card>
 
-    <div class="grid grid-cols-2 gap-6">
+    <div v-if="!planSummary || !report?.planId" class="grid grid-cols-2 gap-6">
       <!-- Left Column - Execution Steps Timeline -->
       <Card class="border-gray-200">
         <CardContent class="pt-6">

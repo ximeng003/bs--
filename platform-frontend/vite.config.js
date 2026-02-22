@@ -13,9 +13,9 @@ export default defineConfig({
         port: 5173,
         proxy: {
             '/api/': {
-                target: 'http://localhost:8080',
+                target: 'http://localhost:18080',
                 changeOrigin: true,
-                rewrite: function (path) { return path.replace(/^\/api\//, '/api/'); }
+                rewrite: function (path) { return path.replace(/^\/api\//, '/api/'); } // Only proxy /api/* to backend
             }
         }
     }

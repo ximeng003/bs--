@@ -18,6 +18,9 @@ public class TestReport implements Serializable {
     @TableField("plan_id")
     private Integer planId;
 
+    @TableField("plan_run_no")
+    private Integer planRunNo;
+
     @TableField("case_id")
     private Integer caseId;
 
@@ -33,4 +36,16 @@ public class TestReport implements Serializable {
 
     @TableField("executed_by")
     private String executedBy;
+
+    @TableField(exist = false)
+    private String caseName;
+
+    @TableField(exist = false)
+    private String planName;
+
+    @TableField(exist = false)
+    private String environment;
+
+    @TableField(exist = false)
+    private String caseType;
 }

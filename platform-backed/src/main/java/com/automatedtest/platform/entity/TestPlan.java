@@ -29,6 +29,9 @@ public class TestPlan implements Serializable {
 
     private String environment;
 
+    @TableField("test_case_ids")
+    private String testCaseIds;
+
     @TableField(value = "created_at", fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
 

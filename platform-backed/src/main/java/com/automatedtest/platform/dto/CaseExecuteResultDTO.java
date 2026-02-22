@@ -10,4 +10,5 @@ public class CaseExecuteResultDTO {
     private String logs;
     private String error;
     private Map<String, Object> response;
+    private Integer reportId;
 }

@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { CheckCircle, XCircle, Clock, TrendingUp } from 'lucide-vue-next'
+import { Button } from '@/components/ui/button'
+import { CheckCircle, XCircle, Clock, TrendingUp, RefreshCw } from 'lucide-vue-next'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
-import { PieChart, LineChart } from 'echarts/charts'
+import { PieChart, LineChart, BarChart } from 'echarts/charts'
 import {
   GridComponent,
   TooltipComponent,
@@ -19,6 +20,7 @@ use([
   CanvasRenderer,
   PieChart,
   LineChart,
+  BarChart,
   GridComponent,
   TooltipComponent,
   LegendComponent,
@@ -100,14 +102,13 @@ const barOption = ref<any>({
     trigger: 'axis'
   },
   legend: {
-    icon: 'roundRect',
     data: [
-      'API用例执行数',
-      'WEB用例执行数',
-      'APP用例执行数',
-      'API用例通过率',
-      'WEB用例通过率',
-      'APP用例通过率'
+      { name: 'API用例执行数', icon: 'roundRect' },
+      { name: 'WEB用例执行数', icon: 'roundRect' },
+      { name: 'APP用例执行数', icon: 'roundRect' },
+      { name: 'API用例通过率', icon: 'circle' },
+      { name: 'WEB用例通过率', icon: 'circle' },
+      { name: 'APP用例通过率', icon: 'circle' }
     ]
   },
   grid: {
@@ -169,8 +170,11 @@ const barOption = ref<any>({
       smooth: true,
       yAxisIndex: 1,
       data: [],
-      lineStyle: { color: '#2F80ED', type: 'dashed' },
-      itemStyle: { color: '#2F80ED' }
+      symbol: 'circle',
+      symbolSize: 6,
+      lineStyle: { color: '#2F80ED', width: 2, type: 'solid' },
+      itemStyle: { color: '#2F80ED' },
+      emphasis: { focus: 'series' }
     },
     {
       name: 'WEB用例通过率',
@@ -178,8 +182,11 @@ const barOption = ref<any>({
       smooth: true,
       yAxisIndex: 1,
       data: [],
-      lineStyle: { color: '#27AE60', type: 'dashed' },
-      itemStyle: { color: '#27AE60' }
+      symbol: 'circle',
+      symbolSize: 6,
+      lineStyle: { color: '#27AE60', width: 2, type: 'solid' },
+      itemStyle: { color: '#27AE60' },
+      emphasis: { focus: 'series' }
     },
     {
       name: 'APP用例通过率',
@@ -187,8 +194,11 @@ const barOption = ref<any>({
       smooth: true,
       yAxisIndex: 1,
       data: [],
-      lineStyle: { color: '#F2994A', type: 'dashed' },
-      itemStyle: { color: '#F2994A' }
+      symbol: 'circle',
+      symbolSize: 6,
+      lineStyle: { color: '#F2994A', width: 2, type: 'solid' },
+      itemStyle: { color: '#F2994A' },
+      emphasis: { focus: 'series' }
     }
   ]
 })
@@ -199,13 +209,19 @@ const router = useRouter()
 const recentActivities = ref<any[]>([])
 const passCount = ref(0)
 const failCount = ref(0)
+const loading = ref(false)
 
 const backendDown = ref(false)
 
 const fetchData = async () => {
+  if (loading.value) return
+  loading.value = true
   try {
+    const res: any = await request.get('/dashboard/stats', {
+      params: { _t: Date.now() } // Prevent caching
+    })
+    console.log('Dashboard stats updated:', res)
     backendDown.value = false
-    const res: any = await request.get('/dashboard/stats')
     if (!res) {
       console.error('Empty dashboard stats response')
       return
@@ -338,13 +354,25 @@ const fetchData = async () => {
   } catch (e) {
     console.error('Failed to fetch dashboard data', e)
     backendDown.value = true
+  } finally {
+    loading.value = false
+  }
+}
+
+const handleVisibilityChange = () => {
+  if (document.visibilityState === 'visible') {
+    fetchData()
   }
 }
 
 onMounted(() => {
   fetchData()
   const timer = setInterval(fetchData, 30000)
-  onUnmounted(() => clearInterval(timer))
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  onUnmounted(() => {
+    clearInterval(timer)
+    document.removeEventListener('visibilitychange', handleVisibilityChange)
+  })
 })
 
 const handleStatClick = (index: number) => {
@@ -379,6 +407,14 @@ const handleBarClick = (params: any) => {
 
 <template>
   <div class="p-6 space-y-6">
+    <div class="flex items-center justify-between mb-4">
+      <h1 class="text-2xl font-bold text-gray-900">仪表盘</h1>
+      <Button variant="outline" size="sm" @click="fetchData" :disabled="loading">
+        <RefreshCw class="w-4 h-4 mr-2" :class="{ 'animate-spin': loading }" />
+        刷新数据
+      </Button>
+    </div>
+
     <div v-if="backendDown" class="p-4 rounded-md bg-yellow-50 border border-yellow-200 text-sm text-yellow-700">
       后端服务可能未启动，当前显示的数据为 0。请先运行后台服务，然后刷新页面。
     </div>

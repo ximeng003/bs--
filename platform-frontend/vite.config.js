@@ -12,10 +12,10 @@ export default defineConfig({
     server: {
         port: 5173,
         proxy: {
-            '/api/': {
+            '/api': {
                 target: 'http://localhost:18080',
                 changeOrigin: true,
-                rewrite: function (path) { return path.replace(/^\/api\//, '/api/'); } // Only proxy /api/* to backend
+                // rewrite: (path) => path.replace(/^\/api/, '') // 如果后端不需要 /api 前缀，可以取消注释
             }
         }
     }

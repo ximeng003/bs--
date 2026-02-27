@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Home, Globe, Monitor, FileText, Settings, CirclePlay } from 'lucide-vue-next';
+import { Home, Globe, Monitor, FileText, Settings, CirclePlay, Code } from 'lucide-vue-next';
 
 defineProps<{
   currentPage: string
@@ -12,6 +12,7 @@ const emit = defineEmits<{
 const menuItems = [
   { id: 'dashboard', icon: Home, label: '工作台' },
   { id: 'api', icon: Globe, label: '测试用例' },
+  { id: 'api-new', icon: Code, label: 'API' },
   { id: 'web-app', icon: Monitor, label: 'Web/App' },
   { id: 'plans', icon: CirclePlay, label: '测试计划' },
   { id: 'report', icon: FileText, label: '测试报告' },

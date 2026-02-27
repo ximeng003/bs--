@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { showToast } from '@/lib/notify'
+import { generateReportHtml } from '@/utils/exportReport'
 import { Card, CardContent } from '@/components/ui/card'
 import Badge from '@/components/ui/badge/Badge.vue'
 import Button from '@/components/ui/button/Button.vue'
-import { CheckCircle, XCircle, Clock, Download, Share2, AlertCircle } from 'lucide-vue-next'
+import { CheckCircle, XCircle, Clock, Download, Share2, AlertCircle, FileText } from 'lucide-vue-next'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { PieChart } from 'echarts/charts'
@@ -644,6 +646,207 @@ onMounted(fetchReport)
 const goBackToReports = () => {
   router.push('/reports')
 }
+
+const selectedReportItem = ref<any>(null)
+const isDetailLoading = ref(false)
+const currentTab = ref('steps')
+const formatJson = ref(true)
+
+const formatBody = (content: any, pretty: boolean = true) => {
+  if (!content) return ''
+  try {
+    const obj = typeof content === 'string' ? JSON.parse(content) : content
+    return pretty ? JSON.stringify(obj, null, 2) : JSON.stringify(obj)
+  } catch {
+    return String(content)
+  }
+}
+
+const fetchAndProcessItem = async (item: PlanItemForReport) => {
+  try {
+    // 1. 获取报告详情 (包含 logs)
+    const reportRes: any = await request.get(`/reports/${item.reportId}`)
+    const reportDetail = reportRes as ReportDetail
+    
+    // 2. 获取测试用例定义 (包含 url, method, body, script 等)
+    let testCaseContent: any = null
+    let testCaseType = item.caseType || 'API'
+    
+    if (item.caseId) {
+      try {
+        const caseRes: any = await request.get(`/testcases/${item.caseId}`)
+        const rawCase = caseRes as RawTestCase
+        testCaseType = rawCase.type || testCaseType
+        
+        if (rawCase.content) {
+          const raw = String(rawCase.content).trim()
+          try {
+            testCaseContent = JSON.parse(raw)
+          } catch {
+            testCaseContent = raw
+          }
+        }
+      } catch (e) {
+        console.warn(`Failed to fetch test case ${item.caseId}`, e)
+      }
+    }
+    
+    // 3. 解析日志
+    const logsStr = String(reportDetail.logs || '')
+    const logLines = logsStr.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0)
+    
+    // 4. 构建步骤 (复用组件内的逻辑)
+    const isSuccess = (reportDetail.status || '').toLowerCase() === 'success'
+    const type = (testCaseType || '').toUpperCase()
+    let steps: ExecutionStep[] = []
+    
+    if (type === 'API') {
+      const errorText = logLines.find((line) => /assert/i.test(line)) || ''
+      steps = buildApiSteps(testCaseContent, isSuccess, errorText)
+    } else if (type === 'WEB') {
+      steps = buildWebSteps(testCaseContent, logLines.length, isSuccess)
+    } else if (type === 'APP') {
+      steps = buildAppSteps(testCaseContent, logLines.length, isSuccess)
+    } else {
+      // Fallback steps from logs
+      steps = logLines.map((msg, idx) => ({
+        step: idx + 1,
+        action: msg,
+        status: /error|fail/i.test(msg) ? 'failed' : 'success',
+        time: '',
+        details: msg,
+        error: /error|fail/i.test(msg)
+      }))
+    }
+    
+    // 5. 提取请求信息
+    let url = item.caseName
+    let method = ''
+    let requestBody = ''
+    let requestHeaders = {}
+    let statusCode = isSuccess ? 200 : 500
+    
+    // 尝试从日志中提取 Response Body
+    let responseBody = ''
+    const responseStartIdx = logLines.findIndex(l => /Response Body:/i.test(l))
+    if (responseStartIdx !== -1) {
+       const line = logLines[responseStartIdx]
+       // 简单的单行提取尝试
+       const match = line.match(/Response Body:\s*(.*)/i)
+       if (match && match[1]) {
+          responseBody = match[1].trim()
+       }
+       // 如果单行没内容，或者是 JSON 对象的开始，可能跨行
+       if ((!responseBody || responseBody === '{' || responseBody === '[') && responseStartIdx + 1 < logLines.length) {
+          // 简单地把后面几行当做 body，直到遇到下一个明显不是 body 的行 (这里简化处理，只取后一行或几行)
+          // 实际情况日志可能很复杂，这里只做简单尝试
+          const nextLines = logLines.slice(responseStartIdx + 1, responseStartIdx + 10) // 取最多10行
+          responseBody = nextLines.join('\n')
+       }
+    }
+    
+    if (type === 'API' && testCaseContent && typeof testCaseContent === 'object') {
+      url = testCaseContent.url || url
+      method = (testCaseContent.method || 'GET').toUpperCase()
+      requestBody = testCaseContent.body || ''
+      requestHeaders = testCaseContent.headers || {}
+    } else if (logLines.length > 0) {
+      // 尝试从日志第一行提取 method url
+      // 假设日志格式: POST http://...
+      const first = logLines[0]
+      if (/^(GET|POST|PUT|DELETE|PATCH)\s+http/i.test(first)) {
+        const parts = first.split(/\s+/)
+        if (parts.length >= 2) {
+          method = parts[0].toUpperCase()
+          url = parts[1]
+        }
+      }
+    }
+
+    return {
+      ...item,
+      url: url || item.caseName || `Test Case #${item.caseId}`,
+      method: method || (type === 'API' ? 'GET' : type),
+      statusCode,
+      requestBody,
+      requestHeaders,
+      responseBody: responseBody || '', 
+      responseHeaders: {},
+      logs: logLines,
+      steps
+    }
+  } catch (err) {
+    console.error(`Process item ${item.reportId} error:`, err)
+    return item // 降级返回基础信息
+  }
+}
+
+const selectReportItem = async (item: PlanItemForReport) => {
+  if (selectedReportItem.value?.reportId === item.reportId) return
+  
+  isDetailLoading.value = true
+  selectedReportItem.value = null
+  currentTab.value = 'steps'
+  
+  try {
+    selectedReportItem.value = await fetchAndProcessItem(item)
+  } catch (e) {
+    console.error(e)
+    showToast('获取详情失败', 'error')
+  } finally {
+    isDetailLoading.value = false
+  }
+}
+
+const handleExport = async () => {
+  if (!planSummary.value) {
+    showToast('暂无报告数据可导出', 'warning')
+    return
+  }
+  
+  showToast('正在获取完整报告数据，请稍候...', 'info')
+  
+  try {
+    const items = planSummary.value.items || []
+    
+    // 并行获取每个用例的详细报告和定义，以生成真实数据
+    const detailedItemsPromises = items.map(fetchAndProcessItem)
+    
+    const detailedItems = await Promise.all(detailedItemsPromises)
+
+    const exportData = {
+      reportDetail: report.value,
+      planSummary: planSummary.value,
+      planItems: detailedItems,
+      exportedAt: new Date().toISOString()
+    }
+    
+    const htmlContent = generateReportHtml(exportData)
+    const blob = new Blob([htmlContent], { type: 'text/html' })
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `report-plan-${planSummary.value.planId}-${report.value?.planRunNo || 'latest'}.html`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(url)
+    showToast('报告导出成功', 'success')
+  } catch (e) {
+    console.error('Export failed:', e)
+    showToast('报告导出失败', 'error')
+  }
+}
+
+const handleShare = async () => {
+  try {
+    await navigator.clipboard.writeText(window.location.href)
+    showToast('链接已复制到剪贴板', 'success')
+  } catch (e) {
+    console.error('Copy failed:', e)
+    showToast('复制链接失败，请手动复制', 'error')
+  }
+}
 </script>
 
 <template>
@@ -680,11 +883,11 @@ const goBackToReports = () => {
             </Badge>
           </div>
           <div class="flex gap-2">
-            <Button variant="outline" size="sm" class="border-gray-300">
+            <Button variant="outline" size="sm" class="border-gray-300" @click="handleExport">
               <Download class="w-4 h-4 mr-2" />
               导出报告
             </Button>
-            <Button variant="outline" size="sm" class="border-gray-300">
+            <Button variant="outline" size="sm" class="border-gray-300" @click="handleShare">
               <Share2 class="w-4 h-4 mr-2" />
               分享
             </Button>
@@ -731,47 +934,165 @@ const goBackToReports = () => {
             <div>执行人：<span class="font-semibold text-gray-900">{{ report?.executedBy || '当前登录用户' }}</span></div>
           </div>
         </div>
-        <div class="mt-6">
-          <div class="grid grid-cols-12 text-xs text-gray-500 border-b border-gray-100 pb-2">
-            <div class="col-span-1">序号</div>
-            <div class="col-span-4">用例名称 / ID</div>
-            <div class="col-span-2">类型</div>
-            <div class="col-span-2">状态</div>
-            <div class="col-span-3">耗时</div>
-          </div>
-          <div
-            v-for="(item, index) in planItems"
-            :key="item.reportId || index"
-            class="grid grid-cols-12 items-center text-sm py-2 border-b border-gray-50"
-          >
-            <div class="col-span-1 text-xs text-gray-500">
-              {{ index + 1 }}
+        <div class="mt-6 flex flex-col lg:flex-row gap-6 h-[800px]">
+          <!-- Left Side: Case List -->
+          <div class="w-full lg:w-1/3 border rounded-lg overflow-hidden flex flex-col bg-white shadow-sm">
+            <div class="p-3 bg-gray-50 border-b font-medium text-sm flex justify-between items-center">
+              <span>测试用例列表 ({{ planItems.length }})</span>
             </div>
-            <div class="col-span-4">
-              <div class="text-gray-900 truncate">
-                {{ item.caseName || `用例 #${item.caseId}` }}
-              </div>
-              <div class="text-xs text-gray-400">
-                ID: {{ item.caseId || '-' }}
-              </div>
-            </div>
-            <div class="col-span-2">
-              <Badge variant="outline" class="text-xs">
-                {{ (item.caseType || '未知').toUpperCase() }}
-              </Badge>
-            </div>
-            <div class="col-span-2">
-              <span
-                class="inline-flex items-center px-2 py-0.5 rounded-full border text-xs"
-                :class="String(item.status || '').toLowerCase() === 'success'
-                  ? 'text-green-700 bg-green-50 border-green-200'
-                  : 'text-red-700 bg-red-50 border-red-200'"
+            <div class="flex-1 overflow-y-auto">
+              <div
+                v-for="(item, index) in planItems"
+                :key="item.reportId || index"
+                @click="selectReportItem(item)"
+                class="p-3 border-b hover:bg-gray-50 cursor-pointer transition-colors"
+                :class="selectedReportItem?.reportId === item.reportId ? 'bg-blue-50 border-l-4 border-l-blue-500' : 'border-l-4 border-l-transparent'"
               >
-                {{ String(item.status || '').toLowerCase() === 'success' ? '通过' : '失败' }}
-              </span>
+                <div class="flex justify-between items-start mb-1">
+                  <div class="font-medium text-sm text-gray-900 truncate flex-1 mr-2" :title="item.caseName || `用例 #${item.caseId}`">
+                    {{ index + 1 }}. {{ item.caseName || `用例 #${item.caseId}` }}
+                  </div>
+                  <Badge 
+                    variant="outline" 
+                    class="text-xs shrink-0"
+                    :class="String(item.status || '').toLowerCase() === 'success' 
+                      ? 'text-green-700 bg-green-50 border-green-200' 
+                      : 'text-red-700 bg-red-50 border-red-200'"
+                  >
+                    {{ String(item.status || '').toLowerCase() === 'success' ? 'PASS' : 'FAIL' }}
+                  </Badge>
+                </div>
+                <div class="flex justify-between items-center text-xs text-gray-500">
+                  <div class="flex gap-2">
+                    <span class="bg-gray-100 px-1.5 py-0.5 rounded">{{ (item.caseType || 'API').toUpperCase() }}</span>
+                    <span>ID: {{ item.caseId || '-' }}</span>
+                  </div>
+                  <span>{{ formatDuration(item.durationMs) }}</span>
+                </div>
+              </div>
             </div>
-            <div class="col-span-3">
-              {{ formatDuration(item.durationMs) }}
+          </div>
+
+          <!-- Right Side: Details -->
+          <div class="w-full lg:w-2/3 border rounded-lg overflow-hidden flex flex-col bg-white shadow-sm">
+            <div v-if="!selectedReportItem && !isDetailLoading" class="flex-1 flex flex-col items-center justify-center text-gray-400">
+              <FileText class="w-16 h-16 mb-4 opacity-20" />
+              <p>请在左侧选择一个测试用例查看详情</p>
+            </div>
+            
+            <div v-else-if="isDetailLoading" class="flex-1 flex items-center justify-center">
+              <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+            </div>
+
+            <div v-else class="flex flex-col h-full">
+              <!-- Detail Header -->
+              <div class="p-4 border-b bg-gray-50">
+                <div class="flex items-start gap-3 mb-2">
+                  <Badge 
+                    :class="selectedReportItem.method === 'GET' ? 'bg-blue-100 text-blue-800' : 
+                            selectedReportItem.method === 'POST' ? 'bg-green-100 text-green-800' : 
+                            selectedReportItem.method === 'DELETE' ? 'bg-red-100 text-red-800' : 
+                            'bg-gray-100 text-gray-800'"
+                    class="mt-0.5"
+                  >
+                    {{ selectedReportItem.method }}
+                  </Badge>
+                  <div class="flex-1 break-all font-mono text-sm text-gray-700">
+                    {{ selectedReportItem.url }}
+                  </div>
+                </div>
+                <div class="flex gap-4 text-xs text-gray-500">
+                  <span class="flex items-center gap-1">
+                    <span class="w-2 h-2 rounded-full" :class="selectedReportItem.statusCode >= 200 && selectedReportItem.statusCode < 300 ? 'bg-green-500' : 'bg-red-500'"></span>
+                    Status: {{ selectedReportItem.statusCode }}
+                  </span>
+                  <span class="flex items-center gap-1">
+                    <Clock class="w-3 h-3" />
+                    Time: {{ formatDuration(selectedReportItem.durationMs) }}
+                  </span>
+                </div>
+              </div>
+
+              <!-- Tabs -->
+              <div class="flex border-b bg-white sticky top-0 z-10">
+                <button 
+                  v-for="tab in ['steps', 'request', 'response', 'logs']" 
+                  :key="tab"
+                  @click="currentTab = tab"
+                  class="px-4 py-2 text-sm font-medium border-b-2 transition-colors capitalize"
+                  :class="currentTab === tab ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'"
+                >
+                  {{ tab }}
+                </button>
+              </div>
+
+              <!-- Tab Content -->
+              <div class="flex-1 overflow-y-auto p-4 bg-gray-50">
+                <!-- Steps Tab -->
+                <div v-if="currentTab === 'steps'" class="space-y-4">
+                  <div v-if="selectedReportItem.steps && selectedReportItem.steps.length > 0">
+                    <div 
+                      v-for="step in selectedReportItem.steps" 
+                      :key="step.step"
+                      class="bg-white p-3 rounded border border-gray-100 shadow-sm"
+                    >
+                      <div class="flex items-start gap-3">
+                        <div class="mt-0.5">
+                          <CheckCircle v-if="step.status === 'success'" class="w-5 h-5 text-green-500" />
+                          <XCircle v-else class="w-5 h-5 text-red-500" />
+                        </div>
+                        <div class="flex-1">
+                          <div class="text-sm font-medium text-gray-900">{{ step.action }}</div>
+                          <div class="text-xs text-gray-500 mt-1 font-mono break-all">{{ step.details }}</div>
+                        </div>
+                        <span class="text-xs text-gray-400">{{ step.step }}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div v-else class="text-center text-gray-400 py-8">暂无步骤信息</div>
+                </div>
+
+                <!-- Request Tab -->
+                <div v-else-if="currentTab === 'request'" class="space-y-4">
+                  <div v-if="selectedReportItem.requestHeaders && Object.keys(selectedReportItem.requestHeaders).length > 0">
+                    <h4 class="text-xs font-semibold text-gray-500 uppercase mb-2">Headers</h4>
+                    <pre class="bg-white p-3 rounded border border-gray-200 text-xs overflow-x-auto">{{ formatBody(selectedReportItem.requestHeaders) }}</pre>
+                  </div>
+                  <div>
+                    <h4 class="text-xs font-semibold text-gray-500 uppercase mb-2">Body</h4>
+                    <pre v-if="selectedReportItem.requestBody" class="bg-white p-3 rounded border border-gray-200 text-xs overflow-x-auto">{{ formatBody(selectedReportItem.requestBody) }}</pre>
+                    <div v-else class="text-gray-400 text-sm italic">No request body</div>
+                  </div>
+                </div>
+
+                <!-- Response Tab -->
+                <div v-else-if="currentTab === 'response'" class="space-y-4">
+                  <div class="flex justify-end mb-2">
+                    <button 
+                      @click="formatJson = !formatJson"
+                      class="text-xs px-2 py-1 border rounded bg-white hover:bg-gray-50"
+                    >
+                      {{ formatJson ? 'Show Raw' : 'Format JSON' }}
+                    </button>
+                  </div>
+                  <pre v-if="selectedReportItem.responseBody" class="bg-white p-3 rounded border border-gray-200 text-xs overflow-x-auto min-h-[200px]">{{ formatBody(selectedReportItem.responseBody, formatJson) }}</pre>
+                  <div v-else class="text-center py-10 text-gray-400 italic border border-dashed rounded bg-white">
+                    No response body recorded
+                  </div>
+                </div>
+
+                <!-- Logs Tab -->
+                <div v-else-if="currentTab === 'logs'" class="space-y-2">
+                  <div 
+                    v-for="(log, idx) in selectedReportItem.logs" 
+                    :key="idx"
+                    class="font-mono text-xs p-2 rounded bg-white border border-gray-100 break-all"
+                  >
+                    {{ log }}
+                  </div>
+                  <div v-if="!selectedReportItem.logs?.length" class="text-center text-gray-400 py-8">暂无日志</div>
+                </div>
+              </div>
             </div>
           </div>
         </div>

@@ -4,6 +4,7 @@ import com.automatedtest.platform.dto.DailyTrendDTO;
 import com.automatedtest.platform.dto.DashboardStatsDTO;
 import com.automatedtest.platform.dto.RecentActivityDTO;
 import com.automatedtest.platform.entity.TestCase;
+import com.automatedtest.platform.entity.TestReport;
 import com.automatedtest.platform.mapper.TestCaseMapper;
 import com.automatedtest.platform.mapper.TestReportMapper;
 import com.automatedtest.platform.service.DashboardService;
@@ -41,11 +42,35 @@ public class DashboardServiceImpl implements DashboardService {
         
         // 2. Daily Trend (Last 7 days)
         LocalDateTime startDate = LocalDateTime.now().minusDays(6).withHour(0).withMinute(0).withSecond(0);
-        List<Map<String, Object>> dailyRaw = testReportMapper.getDailyStats(startDate);
+        
+        // Fetch raw reports since startDate
+        QueryWrapper<TestReport> reportQuery = new QueryWrapper<>();
+        reportQuery.ge("executed_at", startDate);
+        List<TestReport> rawReports = testReportMapper.selectList(reportQuery);
+        
+        // Fetch related test cases for type info
+        Map<Integer, String> caseTypeMap = new HashMap<>();
+        if (rawReports != null && !rawReports.isEmpty()) {
+            Set<Integer> caseIds = rawReports.stream()
+                .map(TestReport::getCaseId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+            
+            if (!caseIds.isEmpty()) {
+                List<TestCase> cases = testCaseMapper.selectBatchIds(caseIds);
+                for (TestCase c : cases) {
+                    caseTypeMap.put(c.getId(), c.getType());
+                }
+            }
+        }
+        
+        // Debug Log
+        System.out.println("Dashboard Stats: Fetching daily stats from " + startDate);
+        System.out.println("Dashboard Stats: Found " + (rawReports != null ? rawReports.size() : 0) + " raw reports for aggregation");
 
         List<DailyTrendDTO> dailyTrend = new ArrayList<>();
         Map<String, DailyTrendDTO> dateMap = new HashMap<>();
-        Map<String, long[]> perTypeCounters = new HashMap<>();
+        Map<String, long[]> perTypeCounters = new HashMap<>(); // key: date|type, val: [total, passed]
         
         // Init last 7 days
         for (int i = 0; i < 7; i++) {
@@ -64,55 +89,36 @@ public class DashboardServiceImpl implements DashboardService {
             dateMap.put(dateStr, dto);
         }
         
-        for (Map<String, Object> record : dailyRaw) {
-            Object dateObj = record.get("date");
-            String dateStr;
-            if (dateObj == null) continue;
-            
-            if (dateObj instanceof java.sql.Date) {
-                 dateStr = ((java.sql.Date) dateObj).toLocalDate().format(DateTimeFormatter.ofPattern("MM-dd"));
-            } else if (dateObj instanceof java.sql.Timestamp) {
-                 dateStr = ((java.sql.Timestamp) dateObj).toLocalDateTime().format(DateTimeFormatter.ofPattern("MM-dd"));
-            } else if (dateObj instanceof LocalDateTime) {
-                 dateStr = ((LocalDateTime) dateObj).format(DateTimeFormatter.ofPattern("MM-dd"));
-            } else {
-                 dateStr = dateObj.toString();
-                 if (dateStr.length() >= 10) {
-                     // Check format like yyyy-MM-dd
-                     try {
-                         // Simple heuristic: assume yyyy-MM-dd at start
-                         dateStr = dateStr.substring(5, 10);
-                     } catch (Exception e) {
-                         // ignore
-                     }
-                 }
-            }
-            
-            String status = (String) record.get("status");
-            String type = (String) record.get("type");
-            Number countNum = (Number) record.get("count");
-            long count = countNum != null ? countNum.longValue() : 0;
-            
-            DailyTrendDTO dto = dateMap.get(dateStr);
-            if (dto != null) {
-                if ("success".equalsIgnoreCase(status)) {
-                    dto.setPassed(dto.getPassed() + count);
-                } else {
-                    dto.setFailed(dto.getFailed() + count);
+        if (rawReports != null) {
+            for (TestReport report : rawReports) {
+                if (report.getExecutedAt() == null) continue;
+                
+                String dateStr = report.getExecutedAt().format(DateTimeFormatter.ofPattern("MM-dd"));
+                String status = report.getStatus();
+                String type = caseTypeMap.get(report.getCaseId()); // Can be null if case deleted
+                
+                DailyTrendDTO dto = dateMap.get(dateStr);
+                if (dto != null) {
+                    if ("success".equalsIgnoreCase(status)) {
+                        dto.setPassed(dto.getPassed() + 1);
+                    } else {
+                        dto.setFailed(dto.getFailed() + 1);
+                    }
                 }
-            }
-
-            if (type != null) {
-                String upperType = type.toUpperCase();
-                String key = dateStr + "|" + upperType;
-                long[] counters = perTypeCounters.computeIfAbsent(key, k -> new long[2]);
-                counters[0] += count;
-                if ("success".equalsIgnoreCase(status)) {
-                    counters[1] += count;
+    
+                if (type != null && dto != null) {
+                    String upperType = type.toUpperCase();
+                    String key = dateStr + "|" + upperType;
+                    long[] counters = perTypeCounters.computeIfAbsent(key, k -> new long[2]);
+                    counters[0] += 1; // total
+                    if ("success".equalsIgnoreCase(status)) {
+                        counters[1] += 1; // passed
+                    }
                 }
             }
         }
 
+        // Fill calculated rates back to dailyTrend DTOs
         for (DailyTrendDTO dto : dailyTrend) {
             String dateStr = dto.getDate();
 
@@ -142,29 +148,44 @@ public class DashboardServiceImpl implements DashboardService {
         }
         stats.setDailyTrend(dailyTrend);
         
-        // 3. Recent Activity
-        List<Map<String, Object>> recentRaw = testReportMapper.getRecentActivity();
-        List<RecentActivityDTO> recentActivity = recentRaw.stream().map(r -> {
-            RecentActivityDTO dto = new RecentActivityDTO();
-            dto.setCaseName((String) r.get("caseName"));
-            dto.setStatus((String) r.get("status"));
-            dto.setExecutedBy((String) r.get("executedBy"));
+        // 3. Recent Activity (Modified to use MP query instead of custom SQL for robustness)
+        QueryWrapper<TestReport> recentWrapper = new QueryWrapper<>();
+        recentWrapper.orderByDesc("executed_at");
+        recentWrapper.last("LIMIT 10");
+        List<TestReport> recentReports = testReportMapper.selectList(recentWrapper);
+        
+        System.out.println("Dashboard Stats: Found " + (recentReports != null ? recentReports.size() : 0) + " recent reports");
+
+        List<RecentActivityDTO> recentActivity = new ArrayList<>();
+        if (recentReports != null && !recentReports.isEmpty()) {
+            Set<Integer> caseIds = recentReports.stream()
+                .map(TestReport::getCaseId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
             
-            Object executedAtObj = r.get("executedAt");
-            LocalDateTime executedAt = null;
-            if (executedAtObj instanceof java.sql.Timestamp) {
-                executedAt = ((java.sql.Timestamp) executedAtObj).toLocalDateTime();
-            } else if (executedAtObj instanceof LocalDateTime) {
-                executedAt = (LocalDateTime) executedAtObj;
+            Map<Integer, String> caseNameMap = new HashMap<>();
+            if (!caseIds.isEmpty()) {
+                List<TestCase> cases = testCaseMapper.selectBatchIds(caseIds);
+                for (TestCase c : cases) {
+                    caseNameMap.put(c.getId(), c.getName());
+                }
             }
             
-            if (executedAt != null) {
-                dto.setTimeAgo(formatTimeAgo(executedAt));
-            } else {
-                dto.setTimeAgo("未知");
+            for (TestReport r : recentReports) {
+                RecentActivityDTO dto = new RecentActivityDTO();
+                String name = caseNameMap.get(r.getCaseId());
+                dto.setCaseName(name != null ? name : "Unknown Case (ID:" + r.getCaseId() + ")");
+                dto.setStatus(r.getStatus());
+                dto.setExecutedBy(r.getExecutedBy() != null ? r.getExecutedBy() : "System");
+                
+                if (r.getExecutedAt() != null) {
+                    dto.setTimeAgo(formatTimeAgo(r.getExecutedAt()));
+                } else {
+                    dto.setTimeAgo("未知");
+                }
+                recentActivity.add(dto);
             }
-            return dto;
-        }).collect(Collectors.toList());
+        }
         
         stats.setRecentActivity(recentActivity);
         

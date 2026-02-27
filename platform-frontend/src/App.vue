@@ -14,6 +14,7 @@ const router = useRouter()
   const currentPage = computed(() => {
     const path = route.path
     if (path === '/' || path === '/dashboard') return 'dashboard'
+    if (path.startsWith('/api-cases/edit')) return 'api-new'
     if (path.startsWith('/api-cases')) return 'api'
     if (path.startsWith('/web-app')) return 'web-app'
     if (path.startsWith('/plans')) return 'plans'
@@ -42,6 +43,7 @@ const showLayout = computed(() => {
     switch (page) {
       case 'dashboard': router.push('/'); break;
       case 'api': router.push('/api-cases'); break;
+      case 'api-new': router.push('/api-cases/edit'); break;
       case 'web-app': router.push('/web-app'); break;
       case 'plans': router.push('/plans'); break;
       case 'report': router.push('/reports'); break;

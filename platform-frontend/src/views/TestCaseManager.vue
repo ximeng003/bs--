@@ -280,13 +280,6 @@ const handleSaveEdit = async () => {
     }
 }
 
-const handleCreate = () => {
-    // Default to creating API case, user can change type?
-    // Or navigate to a create selection page.
-    // Given the UI, we'll go to API editor for now as it's the main one.
-    router.push('/api-cases/edit')
-}
-
 onMounted(() => {
   fetchTestCases()
 })
@@ -497,10 +490,6 @@ const getTypeBadgeClass = (type: string) => {
         >
           <Trash2 class="w-4 h-4 mr-2" />
           删除全部
-        </Button>
-        <Button @click="handleCreate">
-          <Plus class="w-4 h-4 mr-2" />
-          新建API测试用例
         </Button>
       </div>
     </div>

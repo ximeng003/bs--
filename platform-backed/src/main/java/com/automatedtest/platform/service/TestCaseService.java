@@ -8,6 +8,8 @@ import com.baomidou.mybatisplus.extension.service.IService;
 
 public interface TestCaseService extends IService<TestCase> {
     ApiTestResponseDTO executeApiTest(ApiTestRequestDTO request);
+    ApiTestResponseDTO executeApiTest(ApiTestRequestDTO request, Long userId);
+    ApiTestResponseDTO executeApiTest(ApiTestRequestDTO request, Long userId, Integer projectId);
     CaseExecuteResultDTO executeCaseById(Integer id, String executedBy);
     CaseExecuteResultDTO executeCaseById(Integer id, String executedBy, Integer planId);
     CaseExecuteResultDTO executeCaseById(Integer id, String executedBy, Integer planId, Integer planRunNo);

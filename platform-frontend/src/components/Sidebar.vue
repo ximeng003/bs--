@@ -1,5 +1,30 @@
 <script setup lang="ts">
-import { Home, Globe, Monitor, FileText, Settings, CirclePlay, Code } from 'lucide-vue-next';
+import { Home, Globe, Monitor, FileText, Settings, CirclePlay, Code, FolderCog } from 'lucide-vue-next';
+import { userStore } from '@/store/userStore'
+import { useProjectStore } from '@/store/projectStore'
+import { computed, onMounted } from 'vue'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+
+const projectStore = useProjectStore()
+const user = userStore.user
+
+onMounted(() => {
+  projectStore.fetchProjects()
+})
+
+const handleProjectChange = (value: string) => {
+  const project = projectStore.projectList.find(p => p.id === Number(value))
+  if (project) {
+    projectStore.setCurrentProject(project)
+    window.location.reload()
+  }
+}
 
 defineProps<{
   currentPage: string
@@ -16,50 +41,95 @@ const menuItems = [
   { id: 'web-app', icon: Monitor, label: 'Web/App' },
   { id: 'plans', icon: CirclePlay, label: '测试计划' },
   { id: 'report', icon: FileText, label: '测试报告' },
+  { id: 'project-settings', icon: FolderCog, label: '项目设置' },
   { id: 'settings', icon: Settings, label: '系统设置' }
 ];
+
+const filteredMenuItems = computed(() => {
+  return menuItems.filter(item => {
+    if (item.id === 'settings') {
+       return user?.role === 'admin'
+    }
+    return true
+  })
+})
 </script>
 
 <template>
-  <aside class="w-64 bg-[#304156] text-white flex flex-col">
+  <aside class="w-64 bg-[#304156] text-white flex flex-col h-screen">
     <!-- Logo -->
-    <div class="px-6 py-6 border-b border-gray-700">
+    <div class="px-6 py-6 border-b border-[#2b3648] shrink-0">
       <div class="flex items-center gap-3">
-        <div class="w-10 h-10 bg-[#409EFF] rounded-lg flex items-center justify-center">
-          <Monitor class="w-6 h-6 text-white" />
+        <div class="w-10 h-10 bg-primary/20 rounded-lg flex items-center justify-center border border-primary/30">
+          <Monitor class="w-6 h-6 text-primary" />
         </div>
         <div>
-          <div class="font-semibold text-lg">测试平台</div>
-          <div class="text-xs text-gray-400">Automation Hub</div>
+          <div class="font-bold text-lg tracking-wide">测试平台</div>
+          <div class="text-[10px] text-gray-400 uppercase tracking-wider">Automation Hub</div>
         </div>
       </div>
     </div>
 
+    <!-- Project Switcher -->
+    <div class="px-4 py-4 border-b border-[#2b3648] shrink-0">
+      <div class="text-xs text-gray-500 mb-2 font-medium uppercase tracking-wider px-2">当前项目</div>
+      <Select :model-value="projectStore.currentProject?.id?.toString()" @update:model-value="handleProjectChange">
+        <SelectTrigger class="w-full bg-[#1f2d3d] text-white border-[#3d4c63] hover:bg-[#263445]">
+          <SelectValue placeholder="请选择项目" />
+        </SelectTrigger>
+        <SelectContent class="bg-[#1f2d3d] border-[#3d4c63] text-white">
+          <SelectItem 
+            v-for="project in projectStore.projectList" 
+            :key="project.id" 
+            :value="project.id.toString()"
+            class="hover:bg-[#263445] focus:bg-[#263445] cursor-pointer"
+          >
+            {{ project.name }}
+          </SelectItem>
+        </SelectContent>
+      </Select>
+    </div>
+
     <!-- Navigation Menu -->
-    <nav class="flex-1 px-3 py-4">
+    <nav class="flex-1 px-3 py-4 overflow-y-auto">
       <ul class="space-y-1">
-        <li v-for="item in menuItems" :key="item.id">
+        <li v-for="item in filteredMenuItems" :key="item.id">
           <button
             @click="emit('pageChange', item.id)"
-            class="w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors"
+            class="w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 group"
             :class="[
               currentPage === item.id
-                ? 'bg-[#409EFF] text-white'
-                : 'text-gray-300 hover:bg-[#263445] hover:text-white'
+                ? 'bg-primary text-white shadow-lg shadow-primary/20 font-medium'
+                : 'text-gray-400 hover:bg-[#263445] hover:text-white'
             ]"
           >
-            <component :is="item.icon" class="w-5 h-5" />
+            <component 
+              :is="item.icon" 
+              class="w-5 h-5 transition-transform group-hover:scale-110"
+              :class="currentPage === item.id ? 'text-white' : 'text-gray-500 group-hover:text-white'"
+            />
             <span>{{ item.label }}</span>
+            
+            <div v-if="currentPage === item.id" class="ml-auto w-1.5 h-1.5 rounded-full bg-white/50"></div>
           </button>
         </li>
       </ul>
     </nav>
 
-    <!-- Footer -->
-    <div class="px-6 py-4 border-t border-gray-700">
-      <div class="text-xs text-gray-400">
-        <div>版本 v2.0.1</div>
-        <div class="mt-1">© 2026 测试平台</div>
+    <!-- User Profile / Footer -->
+    <div class="px-4 py-4 border-t border-[#2b3648] bg-[#263445]/50 shrink-0">
+      <div class="flex items-center gap-3 px-2">
+        <div class="w-8 h-8 rounded-full bg-gradient-to-tr from-primary to-purple-500 flex items-center justify-center text-xs font-bold shadow-inner">
+          {{ user?.nickname?.charAt(0) || user?.username?.charAt(0) || 'U' }}
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="text-sm font-medium truncate">{{ user?.nickname || user?.username }}</div>
+          <div class="text-xs text-gray-500 truncate capitalize">{{ user?.role || 'User' }}</div>
+        </div>
+      </div>
+      <div class="mt-4 px-2 text-[10px] text-gray-500 flex justify-between">
+        <div>v2.0.1</div>
+        <div>© 2026 Automation</div>
       </div>
     </div>
   </aside>

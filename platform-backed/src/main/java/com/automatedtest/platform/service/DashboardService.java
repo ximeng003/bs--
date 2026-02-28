@@ -3,5 +3,5 @@ package com.automatedtest.platform.service;
 import com.automatedtest.platform.dto.DashboardStatsDTO;
 
 public interface DashboardService {
-    DashboardStatsDTO getDashboardStats();
+    DashboardStatsDTO getDashboardStats(String username, Integer projectId);
 }

@@ -1,14 +1,34 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Sidebar from '@/components/Sidebar.vue'
-import { ArrowLeft, LogOut } from 'lucide-vue-next'
+import { ArrowLeft, LogOut, User, Settings } from 'lucide-vue-next'
 import Button from '@/components/ui/button/Button.vue'
 import { userStore } from '@/store/userStore'
 import NotificationHost from '@/components/ui/notification/NotificationHost.vue'
 
 const route = useRoute()
 const router = useRouter()
+const showUserMenu = ref(false)
+const menuRef = ref<HTMLElement | null>(null)
+
+const toggleUserMenu = () => {
+  showUserMenu.value = !showUserMenu.value
+}
+
+const closeUserMenu = (e: MouseEvent) => {
+  if (menuRef.value && !menuRef.value.contains(e.target as Node)) {
+    showUserMenu.value = false
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('click', closeUserMenu)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', closeUserMenu)
+})
 
 // Map routes to sidebar IDs
   const currentPage = computed(() => {
@@ -95,29 +115,59 @@ const goToProfile = () => {
             <div class="flex items-center gap-4">
               <div class="flex items-center gap-2" />
               <div class="flex items-center gap-3">
-                <div
-                  class="flex items-center gap-2 cursor-pointer hover:bg-gray-100 p-1 pr-3 rounded-full transition-colors border border-transparent hover:border-gray-200"
-                  @click="goToProfile"
-                  title="个人中心"
-                >
-                  <div class="w-8 h-8 rounded-full bg-blue-100 overflow-hidden border border-gray-200">
-                    <img
-                      :src="`https://api.dicebear.com/7.x/avataaars/svg?seed=${userStore.user?.username || 'user'}`"
-                      alt="Avatar"
-                      class="w-full h-full object-cover"
-                    />
+                <div class="relative" ref="menuRef">
+                  <div
+                    class="flex items-center gap-2 cursor-pointer hover:bg-gray-100 p-1 pr-3 rounded-full transition-colors border border-transparent hover:border-gray-200"
+                    @click="toggleUserMenu"
+                    title="用户菜单"
+                  >
+                    <div class="w-8 h-8 rounded-full bg-blue-100 overflow-hidden border border-gray-200">
+                      <img
+                        :src="`https://api.dicebear.com/7.x/avataaars/svg?seed=${userStore.user?.username || 'user'}`"
+                        alt="Avatar"
+                        class="w-full h-full object-cover"
+                      />
+                    </div>
+                    <span class="text-sm text-gray-700 font-medium">{{ userStore.user?.username || 'User' }}</span>
                   </div>
-                  <span class="text-sm text-gray-700 font-medium">{{ userStore.user?.username || 'User' }}</span>
+
+                  <!-- Dropdown Menu -->
+                  <div v-if="showUserMenu" class="absolute right-0 top-full mt-2 w-56 bg-white rounded-md shadow-lg py-1 z-50 border border-gray-200">
+                    <div class="px-4 py-3 border-b border-gray-100 bg-gray-50/50">
+                      <p class="text-sm font-medium text-gray-900 truncate">{{ userStore.user?.username }}</p>
+                      <p class="text-xs text-gray-500 truncate">{{ userStore.user?.role === 'admin' ? '管理员' : '普通用户' }}</p>
+                    </div>
+                    
+                    <div class="py-1">
+                      <button 
+                        @click="goToProfile(); showUserMenu = false" 
+                        class="flex items-center gap-2 w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                      >
+                        <User class="w-4 h-4 text-gray-500" />
+                        个人中心
+                      </button>
+                      
+                      <button 
+                        v-if="userStore.user?.role === 'admin'"
+                        @click="router.push('/settings'); showUserMenu = false" 
+                        class="flex items-center gap-2 w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                      >
+                        <Settings class="w-4 h-4 text-gray-500" />
+                        后台管理
+                      </button>
+                      
+                      <div class="border-t border-gray-100 my-1"></div>
+
+                      <button 
+                        @click="handleLogout" 
+                        class="flex items-center gap-2 w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                      >
+                        <LogOut class="w-4 h-4" />
+                        退出登录
+                      </button>
+                    </div>
+                  </div>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  @click="handleLogout"
-                  title="退出登录"
-                  class="text-gray-500 hover:text-red-600"
-                >
-                  <LogOut class="w-5 h-5" />
-                </Button>
               </div>
             </div>
           </div>

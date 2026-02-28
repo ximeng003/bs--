@@ -10,6 +10,7 @@ import TestCaseManager from '@/views/TestCaseManager.vue'
 import ExecutionHistory from '@/views/ExecutionHistory.vue'
 import Login from '@/views/Login.vue'
 import UserProfile from '@/views/UserProfile.vue'
+import ProjectSettings from '@/views/ProjectSettings.vue'
 
 const routes: RouteRecordRaw[] = [
   {
@@ -77,6 +78,12 @@ const routes: RouteRecordRaw[] = [
     name: 'Settings',
     component: Settings,
     meta: { requiresAuth: true }
+  },
+  {
+    path: '/project-settings',
+    name: 'ProjectSettings',
+    component: ProjectSettings,
+    meta: { requiresAuth: true }
   }
 ]
 
@@ -87,9 +94,13 @@ const router = createRouter({
 
 router.beforeEach((to, from, next) => {
   void from
-  const user = localStorage.getItem('user')
+  const userStr = localStorage.getItem('user')
+  const user = userStr ? JSON.parse(userStr) : null
+  
   if (to.meta.requiresAuth && !user) {
     next('/login')
+  } else if (to.name === 'Settings' && user && user.role !== 'admin') {
+    next('/') // Redirect non-admins away from settings
   } else {
     next()
   }

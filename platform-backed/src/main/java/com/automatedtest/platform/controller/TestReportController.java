@@ -1,19 +1,25 @@
 package com.automatedtest.platform.controller;
 
 import com.automatedtest.platform.common.Result;
+import com.automatedtest.platform.common.UserContext;
 import com.automatedtest.platform.dto.ReportDetailDTO;
+import com.automatedtest.platform.entity.Project;
+import com.automatedtest.platform.entity.TeamMember;
 import com.automatedtest.platform.entity.TestCase;
 import com.automatedtest.platform.entity.TestPlan;
 import com.automatedtest.platform.entity.TestReport;
-import com.automatedtest.platform.service.TestReportService;
+import com.automatedtest.platform.entity.User;
+import com.automatedtest.platform.service.ProjectService;
+import com.automatedtest.platform.service.TeamMemberService;
 import com.automatedtest.platform.service.TestCaseService;
 import com.automatedtest.platform.service.TestPlanService;
+import com.automatedtest.platform.service.TestReportService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.bind.annotation.*;
 import org.springframework.util.StringUtils;
+import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -32,6 +38,27 @@ public class TestReportController {
     @Autowired
     private TestPlanService testPlanService;
 
+    @Autowired
+    private ProjectService projectService;
+    
+    @Autowired
+    private TeamMemberService teamMemberService;
+    
+    private boolean hasProjectAccess(Integer projectId, Long userId) {
+        if (projectId == null || userId == null) return false;
+        // Optimization: If UserContext already has the project ID and it matches, we assume access is valid 
+        // because the interceptor would have checked it (if we trust the interceptor flow).
+        // However, for cross-project access checks, we still need this.
+        
+        Project project = projectService.getById(projectId);
+        if (project == null) return false;
+        
+        long count = teamMemberService.count(new QueryWrapper<TeamMember>()
+                .eq("team_id", project.getTeamId())
+                .eq("user_id", userId));
+        return count > 0;
+    }
+
     @GetMapping
     public Result<IPage<TestReport>> list(@RequestParam(defaultValue = "1") Integer page,
                                           @RequestParam(defaultValue = "10") Integer size,
@@ -43,6 +70,20 @@ public class TestReportController {
         Page<TestReport> pageParam = new Page<>(page, size);
         QueryWrapper<TestReport> queryWrapper = new QueryWrapper<>();
         
+        User user = UserContext.getCurrentUser();
+        Integer projectId = UserContext.getCurrentProjectId();
+
+        boolean isAdmin = user != null && "admin".equalsIgnoreCase(user.getRole());
+
+        if (projectId != null) {
+            queryWrapper.eq("project_id", projectId);
+        } else {
+            // No project ID provided. Only admin can see all.
+            if (!isAdmin) {
+                 return Result.error("Project ID is required");
+            }
+        }
+
         if (StringUtils.hasText(status) && !"all".equalsIgnoreCase(status)) {
             queryWrapper.eq("status", status);
         }
@@ -55,7 +96,6 @@ public class TestReportController {
             queryWrapper.eq("plan_run_no", planRunNo);
         }
         
-        // Keyword search might need joins with Plan/Case names, but for now we just search ID or logs
         if (StringUtils.hasText(keyword)) {
             queryWrapper.like("logs", keyword).or().eq("id", keyword);
         }
@@ -139,6 +179,30 @@ public class TestReportController {
         if (report == null) {
             return Result.error("测试报告不存在");
         }
+        
+        User user = UserContext.getCurrentUser();
+        Integer contextProjectId = UserContext.getCurrentProjectId();
+        
+        if (contextProjectId != null) {
+            if (report.getProjectId() != null && !report.getProjectId().equals(contextProjectId)) {
+                 return Result.error("当前项目上下文不匹配");
+            }
+        }
+        
+        if (user != null && !"admin".equalsIgnoreCase(user.getRole())) {
+             if (report.getProjectId() != null) {
+                 if (!hasProjectAccess(report.getProjectId(), user.getId())) {
+                      return Result.error("您没有该项目的访问权限");
+                 }
+             } else {
+                 // Fallback for old reports without projectId? Or allow if executedBy matches?
+                 String executedBy = report.getExecutedBy() != null ? report.getExecutedBy().trim() : null;
+                 if (executedBy == null || !executedBy.equals(user.getUsername())) {
+                     return Result.error("无权限查看该测试报告");
+                 }
+             }
+        }
+        
         ReportDetailDTO dto = new ReportDetailDTO();
         dto.setId(report.getId());
         dto.setPlanId(report.getPlanId());
@@ -162,23 +226,84 @@ public class TestReportController {
         return Result.success(dto);
     }
     
-    // Create report is usually done internally by execution engine, but expose it for now
     @PostMapping
     public Result<Boolean> save(@RequestBody TestReport testReport) {
+        User user = UserContext.getCurrentUser();
+        Integer projectId = UserContext.getCurrentProjectId();
+        
+        if (projectId != null) {
+            testReport.setProjectId(projectId);
+        }
+        
+        if (user != null && !"admin".equalsIgnoreCase(user.getRole())) {
+            testReport.setExecutedBy(user.getUsername());
+        }
         return Result.success(testReportService.save(testReport));
     }
 
     @DeleteMapping("/{id}")
     public Result<Boolean> delete(@PathVariable Integer id) {
+        TestReport report = testReportService.getById(id);
+        if (report == null) {
+            return Result.error("测试报告不存在");
+        }
+        
+        User user = UserContext.getCurrentUser();
+        Integer contextProjectId = UserContext.getCurrentProjectId();
+
+        if (contextProjectId != null) {
+            if (report.getProjectId() != null && !report.getProjectId().equals(contextProjectId)) {
+                 return Result.error("当前项目上下文不匹配");
+            }
+        }
+
+        if (user != null && !"admin".equalsIgnoreCase(user.getRole())) {
+            String executedBy = report.getExecutedBy() != null ? report.getExecutedBy().trim() : null;
+            if (executedBy == null || !executedBy.equals(user.getUsername())) {
+                return Result.error("无权限删除该测试报告");
+            }
+        }
         return Result.success(testReportService.removeById(id));
     }
 
     @DeleteMapping
     public Result<Boolean> deleteBatch(@RequestBody(required = false) List<Integer> ids) {
-        if (ids == null || ids.isEmpty()) {
-            QueryWrapper<TestReport> queryWrapper = new QueryWrapper<>();
-            return Result.success(testReportService.remove(queryWrapper));
+        User user = UserContext.getCurrentUser();
+        if (user == null) {
+            return Result.error("未登录");
         }
+        
+        Integer contextProjectId = UserContext.getCurrentProjectId();
+        boolean restrictToUser = !"admin".equalsIgnoreCase(user.getRole());
+
+        QueryWrapper<TestReport> queryWrapper = new QueryWrapper<>();
+        if (ids != null && !ids.isEmpty()) {
+            queryWrapper.in("id", ids);
+        }
+        
+        if (contextProjectId != null) {
+            queryWrapper.eq("project_id", contextProjectId);
+        }
+        
+        if (restrictToUser) {
+             queryWrapper.eq("executed_by", user.getUsername());
+        }
+        
+        if (ids == null || ids.isEmpty()) {
+             // Delete all matching criteria
+             if (contextProjectId == null && !restrictToUser) {
+                 // Prevent accidental "delete all" by admin without filters
+                 return Result.error("批量删除需指定条件"); 
+             }
+             return Result.success(testReportService.remove(queryWrapper));
+        }
+
+        // Verify count matches
+        long count = testReportService.count(queryWrapper);
+        if (count != ids.size()) {
+             return Result.error("部分报告不存在或无权限删除");
+        }
+        
         return Result.success(testReportService.removeBatchByIds(ids));
     }
 }

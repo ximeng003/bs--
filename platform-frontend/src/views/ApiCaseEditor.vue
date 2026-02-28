@@ -247,13 +247,83 @@ const handleSave = async () => {
 
 const handleSend = async () => {
   try {
+    // 1. Fetch Global Variables from LocalStorage
+    const globalVars = JSON.parse(localStorage.getItem('global_variables') || '[]')
+    const globalParams = JSON.parse(localStorage.getItem('global_parameters') || '[]')
+    const allVars = [...globalVars, ...globalParams]
+    
+    // 2. Variable Substitution Logic
+    const substitute = (text: string) => {
+      if (!text) return text
+      let result = text
+      
+      // Global Variables Substitution
+      allVars.forEach((v: any) => {
+        if (v.key && v.value) {
+          // Support both {{KEY}} and $(KEY) syntax
+          result = result.replace(new RegExp(`\\{\\{\\s*${v.key}\\s*\\}\\}`, 'g'), v.value)
+          result = result.replace(new RegExp(`\\$\\(\\s*${v.key}\\s*\\)`, 'g'), v.value)
+        }
+      })
+      
+      // Random Functions Substitution
+      // Support {{random.func()}} or $(random.func())
+      const randomFuncPattern = /(\{\{|\$\()random\.([a-zA-Z0-9_]+)\((.*?)\)(\}\}|\))/g
+      
+      result = result.replace(randomFuncPattern, (match, _prefix, funcName, argsStr, _suffix) => {
+        const args = argsStr ? argsStr.split(',').map((s: string) => s.trim().replace(/^['"]|['"]$/g, '')) : []
+        
+        switch(funcName) {
+            case 'uuid':
+                return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                  var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+                  return v.toString(16);
+                });
+            case 'timestamp':
+                return Date.now().toString();
+            case 'date':
+                return new Date().toISOString().split('T')[0];
+            case 'datetime':
+                 return new Date().toISOString();
+            case 'string':
+                const len = parseInt(args[0]) || 8;
+                const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+                let str = '';
+                for (let i = 0; i < len; i++) {
+                    str += chars.charAt(Math.floor(Math.random() * chars.length));
+                }
+                return str;
+            case 'number':
+                const min = parseInt(args[0]) || 0;
+                const max = parseInt(args[1]) || 100;
+                return Math.floor(Math.random() * (max - min + 1) + min).toString();
+            case 'phone':
+                return '1' + Math.floor(Math.random() * 9 + 1) + Math.floor(Math.random() * 1000000000).toString().padStart(9, '0');
+            case 'email':
+                return Math.random().toString(36).substring(7) + '@example.com';
+            case 'username':
+                return 'user_' + Math.random().toString(36).substring(7);
+            default:
+                return match;
+        }
+      })
+
+      return result
+    }
+
+    // 3. Apply substitution to request components
+    const finalUrl = substitute(url.value)
+    const finalBody = substitute(bodyContent.value)
+    const finalHeaders = headers.value.map(h => ({ ...h, value: substitute(h.value) }))
+    const finalParams = params.value.map(p => ({ ...p, value: substitute(p.value) }))
+
     const payload = {
       method: method.value,
-      url: url.value,
+      url: finalUrl,
       bodyType: bodyType.value,
-      body: bodyContent.value,
-      headers: headers.value,
-      params: params.value
+      body: finalBody,
+      headers: finalHeaders,
+      params: finalParams
     }
 
     const res: any = await request.post('/testcases/execute', payload)

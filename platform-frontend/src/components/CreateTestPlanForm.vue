@@ -23,7 +23,9 @@ const form = ref({
   environment: 'dev',
   testCaseIds: [] as string[],
   scheduleEnabled: false,
-  cronExpression: ''
+  cronExpression: '',
+  apiId: '',
+  allowOpenApi: false
 })
 
 const testCases = ref<any[]>([])
@@ -50,6 +52,8 @@ const resetFormFromPlan = () => {
     form.value.environment = props.plan.environment || 'dev'
     form.value.scheduleEnabled = !!props.plan.cronExpression
     form.value.cronExpression = props.plan.cronExpression || ''
+    form.value.apiId = props.plan.apiId || (props.plan.id ? `PLAN_${props.plan.id}` : '')
+    form.value.allowOpenApi = !!props.plan.allowOpenApi
     const rawIds = props.plan.testCaseIds || props.plan.test_case_ids || ''
     if (rawIds) {
       form.value.testCaseIds = String(rawIds)
@@ -66,6 +70,8 @@ const resetFormFromPlan = () => {
     form.value.testCaseIds = []
     form.value.scheduleEnabled = false
     form.value.cronExpression = ''
+    form.value.apiId = `PLAN_${Date.now().toString().slice(-4)}`
+    form.value.allowOpenApi = false
   }
 }
 
@@ -95,6 +101,8 @@ const handleSubmit = async () => {
     environment: form.value.environment,
     testCaseIds: form.value.testCaseIds.join(','),
     cronExpression: form.value.scheduleEnabled ? form.value.cronExpression : null,
+    apiId: form.value.apiId,
+    allowOpenApi: form.value.allowOpenApi,
     status: props.plan?.status || 'active'
   }
 
@@ -179,6 +187,24 @@ const handleSubmit = async () => {
           <Button type="button" variant="outline" size="sm" @click="form.cronExpression = '0 0 * * 0'">每周</Button>
           <Button type="button" variant="outline" size="sm" @click="form.cronExpression = '0 0 1 * *'">每月</Button>
         </div>
+      </div>
+    </div>
+
+    <div class="space-y-4 p-4 bg-gray-50 rounded-lg">
+      <div class="flex items-center justify-between">
+        <div>
+          <Label>允许 OpenAPI 触发</Label>
+          <p class="text-xs text-gray-500 mt-1">开启后可通过 API 远程执行此计划</p>
+        </div>
+        <Switch v-model="form.allowOpenApi" />
+      </div>
+
+      <div v-if="form.allowOpenApi" class="space-y-2">
+        <Label>API 标识符 (Plan ID)</Label>
+        <Input v-model="form.apiId" placeholder="例如: PLAN_1001" />
+        <p class="text-xs text-gray-500">
+          用于 API 调用时的唯一标识，建议使用大写字母和下划线
+        </p>
       </div>
     </div>
 

@@ -29,6 +29,8 @@ interface ExecutionRecord {
   environment: string;
   executor: string;
   caseType?: string;
+  source?: string;
+  webhookStatus?: string;
 }
 
 const executions = ref<ExecutionRecord[]>([])
@@ -148,6 +150,8 @@ const fetchReports = async (skipDateValidation = false) => {
                 const caseType = String(caseTypeRaw || '').toUpperCase()
                 const executedAt = r.executedAt || r.executed_at || (caseInfo && caseInfo.lastRun) || r.lastRun || ''
                 const executedBy = r.executedBy || r.executed_by || 'System'
+                const source = r.triggerType || (r.planId ? 'schedule' : 'manual')
+                const webhookStatus = r.webhookStatus || 'none'
 
                 return {
                     id: idStr,
@@ -162,7 +166,9 @@ const fetchReports = async (skipDateValidation = false) => {
                     engine: 'Server',
                     environment: r.environment || '未设置',
                     executor: executedBy,
-                    caseType: caseType || '未知类型'
+                    caseType: caseType || '未知类型',
+                    source,
+                    webhookStatus
                 }
             })
             selectedIds.value = []
@@ -468,6 +474,18 @@ const getCaseTypeBadgeClass = (type: string) => {
             <div class="flex items-center gap-8 text-sm text-gray-600">
               <div>环境: {{ formatEnvironment(record.environment) }}</div>
               <div>执行人: {{ record.executor }}</div>
+              <div>
+                来源: 
+                <span v-if="record.source === 'openapi'" class="text-purple-600 font-medium">OpenAPI</span>
+                <span v-else-if="record.source === 'schedule'" class="text-blue-600">定时任务</span>
+                <span v-else>手动触发</span>
+              </div>
+              <div v-if="record.webhookStatus && record.webhookStatus !== 'none'">
+                Webhook: 
+                <span :class="record.webhookStatus === 'success' ? 'text-green-600' : 'text-red-600'">
+                  {{ record.webhookStatus === 'success' ? '成功' : '失败' }}
+                </span>
+              </div>
               <div v-if="record.status !== 'running'">
                 通过率: {{ Math.round((record.passedCases / record.totalCases) * 100) }}%
               </div>

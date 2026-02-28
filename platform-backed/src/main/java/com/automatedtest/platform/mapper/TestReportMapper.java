@@ -22,6 +22,9 @@ public interface TestReportMapper extends BaseMapper<TestReport> {
     @Select("SELECT AVG(execution_time) FROM test_reports")
     Double getAvgDuration();
 
+    @Select("SELECT AVG(execution_time) FROM test_reports WHERE executed_by = #{executedBy}")
+    Double getAvgDurationByExecutedBy(@Param("executedBy") String executedBy);
+
     @Select("SELECT r.status, r.executed_by as executedBy, r.executed_at as executedAt, c.name as caseName FROM test_reports r LEFT JOIN test_cases c ON r.case_id = c.id ORDER BY r.executed_at DESC LIMIT 10")
     List<Map<String, Object>> getRecentActivity();
 }

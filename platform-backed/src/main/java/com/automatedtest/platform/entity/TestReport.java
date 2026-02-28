@@ -15,6 +15,9 @@ public class TestReport implements Serializable {
     @TableId(value = "id", type = IdType.AUTO)
     private Integer id;
 
+    @TableField("project_id")
+    private Integer projectId;
+
     @TableField("plan_id")
     private Integer planId;
 

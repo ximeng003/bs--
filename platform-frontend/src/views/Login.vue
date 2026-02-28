@@ -61,6 +61,8 @@ const handleSubmit = async () => {
     const msg = e?.message || ''
     if (msg.includes('Network Error') || msg.includes('ECONNREFUSED') || msg.includes('500')) {
       error.value = '登录失败：后端服务可能未启动，请先运行后台服务。'
+    } else if (msg.includes('Invalid username or password')) {
+      error.value = '登录失败：用户名或密码错误'
     } else {
       error.value = (isRegister.value ? '注册失败: ' : '登录失败: ') + (msg || '未知错误')
     }

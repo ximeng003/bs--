@@ -25,4 +25,7 @@ public class Environment implements Serializable {
     private String databaseName;
     
     private Boolean active;
+
+    @TableField("project_id")
+    private Integer projectId;
 }

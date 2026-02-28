@@ -8,7 +8,7 @@ import Badge from '@/components/ui/badge/Badge.vue'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import Label from '@/components/ui/label/Label.vue'
-import { Search, Plus, Pencil, Trash2, Play, Code } from 'lucide-vue-next'
+import { Search, Pencil, Trash2, Play, Code, Loader2 } from 'lucide-vue-next'
 import request from '@/api/request'
 import { showToast, openConfirm } from '@/lib/notify'
 
@@ -30,6 +30,7 @@ interface TestCase {
 
 const testCases = ref<TestCase[]>([])
 const loading = ref(false)
+const executingCaseId = ref<string | null>(null)
 const searchTerm = ref('')
 const filterType = ref('all')
 const SORT_STORAGE_KEY = 'testcase_sort_mode'
@@ -193,6 +194,9 @@ const handleDeleteAll = async () => {
 }
 
 const handleRun = async (id: string) => {
+  if (executingCaseId.value) return // Prevent multiple executions
+  executingCaseId.value = id
+  showToast('正在执行中，请稍候...', 'info')
   try {
     const res: any = await request.post(`/testcases/${id}/execute`)
     await fetchTestCases()
@@ -242,6 +246,8 @@ const handleRun = async (id: string) => {
     logDialogMessage.value = '后端返回错误，请查看下方详细日志'
     logDialogDetail.value = e?.response?.data || e?.message || ''
     logDialogOpen.value = true
+  } finally {
+    executingCaseId.value = null
   }
 }
 
@@ -530,8 +536,15 @@ const getTypeBadgeClass = (type: string) => {
             </div>
 
             <div class="flex items-center gap-2">
-              <Button variant="ghost" size="icon" class="text-green-600 hover:text-green-700 hover:bg-green-50" @click="handleRun(testCase.id)">
-                <Play class="w-4 h-4" />
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                class="text-green-600 hover:text-green-700 hover:bg-green-50" 
+                @click="handleRun(testCase.id)"
+                :disabled="executingCaseId === testCase.id"
+              >
+                <Loader2 v-if="executingCaseId === testCase.id" class="w-4 h-4 animate-spin" />
+                <Play v-else class="w-4 h-4" />
               </Button>
               <Button variant="ghost" size="icon" class="text-blue-600 hover:text-blue-700 hover:bg-blue-50" @click="handleEdit(testCase.id)">
                 <Pencil class="w-4 h-4" />

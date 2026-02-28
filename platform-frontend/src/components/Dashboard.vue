@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { CheckCircle, XCircle, Clock, TrendingUp, RefreshCw } from 'lucide-vue-next'
+import { CheckCircle, XCircle, Clock, TrendingUp, RefreshCw, PlayCircle, AlertCircle } from 'lucide-vue-next'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { PieChart, LineChart, BarChart } from 'echarts/charts'
@@ -207,6 +207,8 @@ const router = useRouter()
 
 // Recent activities
 const recentActivities = ref<any[]>([])
+const myRunningTasks = ref<any[]>([])
+const myFailedPlans = ref<any[]>([])
 const passCount = ref(0)
 const failCount = ref(0)
 const loading = ref(false)
@@ -225,6 +227,24 @@ const fetchData = async () => {
     if (!res) {
       console.error('Empty dashboard stats response')
       return
+    }
+
+    // Update My Running Tasks
+    if (res.myRunningTasks) {
+      myRunningTasks.value = res.myRunningTasks.map((task: any) => ({
+        id: task.id,
+        name: task.name,
+        startTime: new Date(task.lastRunTime).toLocaleString()
+      }))
+    }
+
+    // Update My Failed Plans
+    if (res.myFailedPlans) {
+      myFailedPlans.value = res.myFailedPlans.map((plan: any) => ({
+        id: plan.id,
+        name: plan.name,
+        failTime: new Date(plan.lastRunTime).toLocaleString()
+      }))
     }
 
     let totalCases = Number((res as any).totalCases ?? 0) || 0
@@ -351,9 +371,15 @@ const fetchData = async () => {
       executor: item.executedBy || 'System'
     }))
     
-  } catch (e) {
+  } catch (e: any) {
     console.error('Failed to fetch dashboard data', e)
-    backendDown.value = true
+    // Only show backend down message if it's a network error (no response)
+    // Check for e.config (Axios error) and !e.response (no response received)
+    if (e.config && !e.response) {
+      backendDown.value = true
+    } else {
+      backendDown.value = false
+    }
   } finally {
     loading.value = false
   }
@@ -480,6 +506,59 @@ const handleBarClick = (params: any) => {
         <CardContent>
           <div class="h-80">
             <VChart :option="barOption" autoresize class="w-full h-full" @click="handleBarClick" />
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+
+    <!-- Workbench Snapshot -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <!-- My Running Tasks -->
+      <Card class="border-gray-200">
+        <CardHeader class="flex flex-row items-center justify-between pb-2">
+          <CardTitle class="text-lg font-medium">我的任务 (运行中)</CardTitle>
+          <PlayCircle class="w-5 h-5 text-blue-500" />
+        </CardHeader>
+        <CardContent>
+          <div v-if="myRunningTasks.length > 0" class="space-y-4">
+            <div v-for="task in myRunningTasks" :key="task.id" class="flex items-center justify-between p-3 bg-blue-50 rounded-lg">
+              <div class="flex flex-col">
+                <span class="font-medium text-gray-900">{{ task.name }}</span>
+                <span class="text-xs text-gray-500">开始时间: {{ task.startTime }}</span>
+              </div>
+              <div class="flex items-center">
+                <span class="animate-pulse inline-block w-2 h-2 rounded-full bg-blue-500 mr-2"></span>
+                <span class="text-sm text-blue-600">运行中</span>
+              </div>
+            </div>
+          </div>
+          <div v-else class="text-center py-8 text-gray-500 text-sm">
+            暂无运行中的任务
+          </div>
+        </CardContent>
+      </Card>
+
+      <!-- Exception Reminders -->
+      <Card class="border-gray-200">
+        <CardHeader class="flex flex-row items-center justify-between pb-2">
+          <CardTitle class="text-lg font-medium">异常提醒 (最近失败)</CardTitle>
+          <AlertCircle class="w-5 h-5 text-red-500" />
+        </CardHeader>
+        <CardContent>
+          <div v-if="myFailedPlans.length > 0" class="space-y-4">
+            <div v-for="plan in myFailedPlans" :key="plan.id" class="flex items-center justify-between p-3 bg-red-50 rounded-lg cursor-pointer hover:bg-red-100 transition-colors" @click="router.push('/reports?status=failed')">
+              <div class="flex flex-col">
+                <span class="font-medium text-gray-900">{{ plan.name }}</span>
+                <span class="text-xs text-gray-500">失败时间: {{ plan.failTime }}</span>
+              </div>
+              <div class="flex items-center">
+                <span class="inline-block w-2 h-2 rounded-full bg-red-500 mr-2"></span>
+                <span class="text-sm text-red-600">执行失败</span>
+              </div>
+            </div>
+          </div>
+          <div v-else class="text-center py-8 text-gray-500 text-sm">
+            暂无失败的任务计划
           </div>
         </CardContent>
       </Card>

@@ -45,6 +45,9 @@ public class TestCase implements Serializable {
     
     private String lastResult; // success, failed, pending
 
+    @TableField("project_id")
+    private Integer projectId;
+
     @TableField("created_by")
     private Integer createdBy;
 

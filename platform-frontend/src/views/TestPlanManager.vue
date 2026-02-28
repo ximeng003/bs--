@@ -5,6 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import Button from '@/components/ui/button/Button.vue'
 import Badge from '@/components/ui/badge/Badge.vue'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Plus, Play, Calendar, Clock, Pencil, Trash2, Copy } from 'lucide-vue-next'
 import CreateTestPlanForm from '@/components/CreateTestPlanForm.vue'
 import request from '@/api/request'
@@ -25,7 +27,11 @@ interface TestPlan {
   environment: string
   status: 'active' | 'inactive'
   lastRun?: string
+  lastRunTime?: string
+  lastRunStatus?: string
   successRate?: number
+  apiId?: string
+  allowOpenApi?: boolean
 }
 
 const router = useRouter()
@@ -252,6 +258,91 @@ const getSuccessRateColor = (rate?: number) => {
   if (rate >= 70) return 'text-yellow-600'
   return 'text-red-600'
 }
+
+// CI/CD Integration Logic
+const savedApiKeys = localStorage.getItem('api_keys')
+const defaultApiKeys = [
+  {
+    id: '1',
+    name: 'Jenkins CI',
+    key: 'sk_test_abcdef1234567890',
+    permissions: ['read', 'execute'],
+    createdAt: '2026-01-01',
+    lastUsed: '2026-01-02 10:30'
+  }
+]
+const apiKeys = ref(savedApiKeys ? JSON.parse(savedApiKeys) : defaultApiKeys)
+const selectedKey = ref(apiKeys.value.length > 0 ? apiKeys.value[0].key : 'sk_test_...')
+const selectedKeyName = ref(apiKeys.value.length > 0 ? apiKeys.value[0].name : 'Default Key')
+const selectedPlanId = ref('PLAN_1001')
+const selectedPlanName = ref('示例计划')
+
+// Auto-select first available plan with API ID
+watch(testPlans, (plans) => {
+  const planWithApi = plans.find(p => p.apiId && p.allowOpenApi)
+  if (planWithApi && planWithApi.apiId) {
+    selectedPlanId.value = planWithApi.apiId
+    selectedPlanName.value = planWithApi.name
+  } else if (plans.length > 0) {
+    // Fallback to first plan ID if no API ID configured
+    selectedPlanId.value = plans[0].id
+    selectedPlanName.value = plans[0].name
+  }
+}, { immediate: true })
+
+const updateSelectedKey = (key: string) => {
+  const k = apiKeys.value.find((k: any) => k.key === key)
+  if (k) {
+    selectedKey.value = k.key
+    selectedKeyName.value = k.name
+  }
+}
+
+const updateSelectedPlan = (id: string) => {
+  // Check if it's an API ID or internal ID
+  const plan = testPlans.value.find(p => p.apiId === id || p.id === id)
+  if (plan) {
+    selectedPlanId.value = plan.apiId || plan.id
+    selectedPlanName.value = plan.name
+  }
+}
+
+const copyToClipboard = async (text: string) => {
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text)
+      showToast('复制成功', 'success')
+    } else {
+      const textarea = document.createElement('textarea')
+      textarea.value = text
+      textarea.style.position = 'fixed'
+      textarea.style.opacity = '0'
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textarea)
+      showToast('复制成功', 'success')
+    }
+  } catch (e) {
+    showToast('复制失败', 'error')
+  }
+}
+
+const getOpenApiCurl = () => {
+  return `curl -X POST http://localhost:18080/api/plans/${selectedPlanId.value}/execute \\
+  -H 'X-API-KEY: ${selectedKey.value}' \\
+  -H 'Content-Type: application/json'`
+}
+
+const getJenkinsPipeline = () => {
+  return `pipeline {
+  stage('Run Tests') {
+    steps {
+      sh "curl -X POST http://localhost:18080/api/plans/${selectedPlanId.value}/execute -H 'X-API-KEY: ${selectedKey.value}'"
+    }
+  }
+}`
+}
 </script>
 
 <template>
@@ -298,33 +389,6 @@ const getSuccessRateColor = (rate?: number) => {
       </Card>
     </div>
 
-    <!-- Actions -->
-    <Card>
-      <CardContent class="pt-6">
-        <div class="flex gap-4">
-          <Dialog :open="isCreateDialogOpen" @update:open="isCreateDialogOpen = $event">
-            <DialogTrigger as-child>
-              <Button @click="isCreateDialogOpen = true">
-                <Plus class="w-4 h-4 mr-2" />
-                创建测试计划
-              </Button>
-            </DialogTrigger>
-            <DialogContent class="max-w-2xl h-[90vh] flex flex-col">
-              <DialogHeader>
-                <DialogTitle>创建测试计划</DialogTitle>
-                <DialogDescription>
-                  组合多个测试用例，配置定时任务和执行策略
-                </DialogDescription>
-              </DialogHeader>
-              <div class="flex-1 overflow-y-auto pr-1">
-                <CreateTestPlanForm @close="isCreateDialogOpen = false" @success="handleCreateSuccess" />
-              </div>
-            </DialogContent>
-          </Dialog>
-        </div>
-      </CardContent>
-    </Card>
-
     <Dialog :open="isEditDialogOpen" @update:open="isEditDialogOpen = $event">
       <DialogContent class="max-w-2xl h-[90vh] flex flex-col">
         <DialogHeader>
@@ -348,28 +412,82 @@ const getSuccessRateColor = (rate?: number) => {
     <!-- CI/CD Integration -->
     <Card class="border-purple-200 bg-purple-50">
       <CardHeader>
-        <CardTitle class="text-purple-900">CI/CD 集成</CardTitle>
-        <CardDescription class="text-purple-700">
-          通过 OpenAPI 或 Webhook 集成到您的 CI/CD 流程
-        </CardDescription>
+        <div class="flex items-center justify-between">
+          <div>
+            <CardTitle class="text-purple-900">CI/CD 集成</CardTitle>
+            <CardDescription class="text-purple-700">
+              通过 OpenAPI 或 Webhook 集成到您的 CI/CD 流程
+            </CardDescription>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-sm text-purple-800 font-medium">选择密钥:</span>
+            <Select v-model="selectedKey" @update:modelValue="updateSelectedKey">
+              <SelectTrigger class="w-[200px] bg-white border-purple-200 text-purple-900 h-8">
+                <SelectValue :placeholder="selectedKeyName" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem v-for="key in apiKeys" :key="key.id" :value="key.key">
+                  {{ key.name }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <span class="text-sm text-purple-800 font-medium ml-4">选择计划:</span>
+            <Select :modelValue="selectedPlanId" @update:modelValue="updateSelectedPlan">
+              <SelectTrigger class="w-[200px] bg-white border-purple-200 text-purple-900 h-8">
+                <SelectValue :placeholder="selectedPlanName" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem v-for="plan in testPlans" :key="plan.id" :value="plan.apiId || plan.id">
+                  {{ plan.name }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
       </CardHeader>
-      <CardContent class="space-y-4">
-        <div class="bg-white rounded-lg p-4 space-y-2">
-          <h4 class="font-semibold text-sm">OpenAPI 触发</h4>
-          <pre class="bg-gray-900 text-green-400 p-3 rounded text-xs overflow-x-auto">curl -X POST http://localhost:18080/api/plans/1/execute \
-  -H "Content-Type: application/json" \
-  -d '{"planId": 1}'</pre>
-        </div>
-        <div class="bg-white rounded-lg p-4 space-y-2">
-          <h4 class="font-semibold text-sm">Jenkins 集成示例</h4>
-          <pre class="bg-gray-900 text-green-400 p-3 rounded text-xs overflow-x-auto">pipeline {
-  stage('Run Tests') {
-    steps {
-      sh 'curl -X POST http://localhost:18080/api/plans/1/execute'
-    }
-  }
-}</pre>
-        </div>
+      <CardContent>
+        <Tabs default-value="curl" class="w-full">
+          <TabsList class="grid w-full grid-cols-2 bg-purple-100 p-1">
+            <TabsTrigger value="curl" class="data-[state=active]:bg-white data-[state=active]:text-purple-700 data-[state=active]:shadow-sm">OpenAPI 触发</TabsTrigger>
+            <TabsTrigger value="jenkins" class="data-[state=active]:bg-white data-[state=active]:text-purple-700 data-[state=active]:shadow-sm">Jenkins 集成</TabsTrigger>
+          </TabsList>
+          
+          <TabsContent value="curl" class="mt-4">
+            <div class="bg-gray-900 rounded-lg p-4 relative group overflow-hidden">
+              <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                <Button variant="ghost" size="icon" class="h-8 w-8 text-gray-400 hover:text-white hover:bg-gray-800" @click="copyToClipboard(getOpenApiCurl())">
+                  <Copy class="w-4 h-4" />
+                </Button>
+              </div>
+              <div class="font-mono text-xs leading-relaxed">
+                <div class="text-purple-400"># 立即执行测试计划 ({{ selectedPlanName }})</div>
+                <div class="text-yellow-400">curl</div> <span class="text-gray-300">-X POST</span> <span class="text-green-400">http://localhost:18080/api/plans/{{ selectedPlanId }}/execute</span> \
+                <div class="pl-4"><span class="text-gray-300">-H</span> <span class="text-green-400">"X-API-KEY: <span class="text-white font-bold">{{ selectedKey }}</span>"</span> \</div>
+                <div class="pl-4"><span class="text-gray-300">-H</span> <span class="text-green-400">"Content-Type: application/json"</span></div>
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="jenkins" class="mt-4">
+            <div class="bg-gray-900 rounded-lg p-4 relative group overflow-hidden">
+              <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                <Button variant="ghost" size="icon" class="h-8 w-8 text-gray-400 hover:text-white hover:bg-gray-800" @click="copyToClipboard(getJenkinsPipeline())">
+                  <Copy class="w-4 h-4" />
+                </Button>
+              </div>
+              <div class="font-mono text-xs leading-relaxed text-gray-300">
+                <div class="text-blue-400">pipeline</div> {
+                <div class="pl-4"><span class="text-blue-400">stage</span>(<span class="text-green-400">'Run Tests'</span>) {</div>
+                <div class="pl-8"><span class="text-blue-400">steps</span> {</div>
+                <div class="pl-12"><span class="text-yellow-400">sh</span> <span class="text-green-400">"curl -X POST http://localhost:18080/api/plans/{{ selectedPlanId }}/execute \</span></div>
+                <div class="pl-16"><span class="text-green-400">-H 'X-API-KEY: <span class="text-white font-bold">{{ selectedKey }}</span>'"</span></div>
+                <div class="pl-8">}</div>
+                <div class="pl-4">}</div>
+                <div>}</div>
+              </div>
+            </div>
+          </TabsContent>
+        </Tabs>
       </CardContent>
     </Card>
 
@@ -380,7 +498,28 @@ const getSuccessRateColor = (rate?: number) => {
         <CardDescription>管理和执行所有测试计划</CardDescription>
       </CardHeader>
       <CardContent>
-        <div class="flex items-center justify-end mb-4">
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex gap-4">
+            <Dialog :open="isCreateDialogOpen" @update:open="isCreateDialogOpen = $event">
+              <DialogTrigger as-child>
+                <Button @click="isCreateDialogOpen = true">
+                  <Plus class="w-4 h-4 mr-2" />
+                  创建测试计划
+                </Button>
+              </DialogTrigger>
+              <DialogContent class="max-w-2xl h-[90vh] flex flex-col">
+                <DialogHeader>
+                  <DialogTitle>创建测试计划</DialogTitle>
+                  <DialogDescription>
+                    组合多个测试用例，配置定时任务和执行策略
+                  </DialogDescription>
+                </DialogHeader>
+                <div class="flex-1 overflow-y-auto pr-1">
+                  <CreateTestPlanForm @close="isCreateDialogOpen = false" @success="handleCreateSuccess" />
+                </div>
+              </DialogContent>
+            </Dialog>
+          </div>
           <div class="flex items-center gap-3">
             <label class="flex items-center gap-2 text-sm text-gray-600">
               <input
@@ -434,7 +573,14 @@ const getSuccessRateColor = (rate?: number) => {
                   <div class="flex flex-wrap gap-4 text-xs text-gray-500 pt-2">
                     <div class="flex items-center gap-1">
                       <Calendar class="w-3 h-3" />
-                      上次运行: {{ plan.lastRun || '从未' }}
+                      上次运行: {{ plan.lastRunTime ? new Date(plan.lastRunTime).toLocaleString() : (plan.lastRun || '从未') }}
+                      <span v-if="plan.lastRunStatus" :class="{
+                        'text-green-600': plan.lastRunStatus === 'Success',
+                        'text-red-600': plan.lastRunStatus === 'Failed',
+                        'text-blue-600': plan.lastRunStatus === 'Running'
+                      }" class="ml-1 font-medium">
+                        [{{ plan.lastRunStatus }}]
+                      </span>
                     </div>
                     <div v-if="plan.cronExpression" class="flex items-center gap-1 text-blue-600">
                       <Clock class="w-3 h-3" />
@@ -442,6 +588,11 @@ const getSuccessRateColor = (rate?: number) => {
                     </div>
                     <div v-if="plan.successRate !== undefined" :class="getSuccessRateColor(plan.successRate)">
                       成功率: {{ plan.successRate }}%
+                    </div>
+                    <div v-if="plan.apiId" class="flex items-center gap-2 ml-2">
+                      <span class="font-mono bg-gray-100 px-2 py-0.5 rounded text-gray-600">{{ plan.apiId }}</span>
+                      <span v-if="plan.allowOpenApi" class="text-green-600 text-[10px] border border-green-200 bg-green-50 px-1 rounded">OpenAPI 开启</span>
+                      <span v-else class="text-gray-400 text-[10px] border border-gray-200 bg-gray-50 px-1 rounded">OpenAPI 关闭</span>
                     </div>
                   </div>
                 </div>

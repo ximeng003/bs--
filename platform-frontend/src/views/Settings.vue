@@ -1,10 +1,18 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import Button from '@/components/ui/button/Button.vue'
 import Input from '@/components/ui/input/Input.vue'
 import Label from '@/components/ui/label/Label.vue'
+import Switch from '@/components/ui/switch/Switch.vue'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import Badge from '@/components/ui/badge/Badge.vue'
 import {
   Dialog,
@@ -14,17 +22,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { Plus, Trash2, Copy, Key, Globe, Database, Zap, Pencil, Settings, Link } from 'lucide-vue-next'
-import request from '@/api/request'
+import { Plus, Trash2, Copy, Key, Globe, Database, Zap, Pencil, Settings, BookOpen } from 'lucide-vue-next'
 import { showToast, openConfirm } from '@/lib/notify'
-import Switch from '@/components/ui/switch/Switch.vue'
 
 // Environment Settings
 interface Environment {
@@ -35,20 +34,6 @@ interface Environment {
   databaseName: string
   active: boolean
   variables?: Array<{ key: string; value: string; description?: string }>
-}
-
-interface Variable {
-    key: string
-    value: string
-    type: 'variable' | 'parameter'
-    scope: 'global'
-    description?: string
-    isAuto?: boolean
-    extractConfig?: {
-        sourceApi: string
-        method: 'json' | 'regex' | 'header'
-        expression: string
-    }
 }
 
 const environments = ref<Environment[]>([])
@@ -192,67 +177,37 @@ onMounted(() => {
     fetchEnvironments()
 })
 
-// Variables Settings (Mock for now or use same pattern)
-const variables = ref<Variable[]>([
-  { 
-      key: 'API_TOKEN', 
-      value: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...', 
-      type: 'variable', 
-      scope: 'global', 
-      description: 'API认证令牌（动态变量）', 
-      isAuto: true,
-      extractConfig: {
-          sourceApi: '用户登录接口',
-          method: 'json',
-          expression: '$.data.token'
-      }
-  },
-])
+// Global Variables & Parameters Persistence
+const STORAGE_VARS_KEY = 'global_variables'
+const STORAGE_PARAMS_KEY = 'global_parameters'
 
-const parameters = ref<Variable[]>([
+// Variables Settings
+const variables = ref(JSON.parse(localStorage.getItem(STORAGE_VARS_KEY) || JSON.stringify([
+  { 
+    key: 'API_TOKEN', 
+    value: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...', 
+    type: 'variable', 
+    scope: 'global', 
+    description: 'API认证令牌（动态变量）', 
+    isAuto: true,
+    sourceType: 'api',
+    sourceExpression: 'data.token'
+  },
+])))
+
+const parameters = ref(JSON.parse(localStorage.getItem(STORAGE_PARAMS_KEY) || JSON.stringify([
   { key: 'DEFAULT_USER', value: 'testuser', type: 'parameter', scope: 'global', description: '默认测试用户（静态参数）' },
   { key: 'DEFAULT_PASSWORD', value: 'Test@123456', type: 'parameter', scope: 'global', description: '默认测试密码' },
   { key: 'TIMEOUT', value: '30000', type: 'parameter', scope: 'global', description: '请求超时时间（毫秒）' }
-])
+])))
 
-// Variable Config Dialog
-const isVariableConfigOpen = ref(false)
-const currentVariable = ref<Variable | null>(null)
-const variableConfigForm = ref({
-    isAuto: false,
-    sourceApi: '',
-    method: 'json',
-    expression: ''
-})
+watch(variables, (newVal) => {
+  localStorage.setItem(STORAGE_VARS_KEY, JSON.stringify(newVal))
+}, { deep: true })
 
-const handleOpenVariableConfig = (variable: Variable) => {
-    currentVariable.value = variable
-    variableConfigForm.value = {
-        isAuto: variable.isAuto || false,
-        sourceApi: variable.extractConfig?.sourceApi || '',
-        method: (variable.extractConfig?.method as any) || 'json',
-        expression: variable.extractConfig?.expression || ''
-    }
-    isVariableConfigOpen.value = true
-}
-
-const handleSaveVariableConfig = () => {
-    if (currentVariable.value) {
-        currentVariable.value.isAuto = variableConfigForm.value.isAuto
-        if (variableConfigForm.value.isAuto) {
-            currentVariable.value.extractConfig = {
-                sourceApi: variableConfigForm.value.sourceApi,
-                method: variableConfigForm.value.method as any,
-                expression: variableConfigForm.value.expression
-            }
-        } else {
-            currentVariable.value.extractConfig = undefined
-        }
-        showToast('配置保存成功', 'success')
-        isVariableConfigOpen.value = false
-    }
-}
-
+watch(parameters, (newVal) => {
+  localStorage.setItem(STORAGE_PARAMS_KEY, JSON.stringify(newVal))
+}, { deep: true })
 
 // Functions Settings
 const functions = [
@@ -299,7 +254,17 @@ const functions = [
 ]
 
 // API Settings
-const apiKeys = ref([
+interface ApiKey {
+  id: string
+  name: string
+  key: string
+  permissions: string[]
+  createdAt: string
+  lastUsed: string
+}
+
+const savedApiKeys = localStorage.getItem('api_keys')
+const apiKeys = ref<ApiKey[]>(savedApiKeys ? JSON.parse(savedApiKeys) : [
   {
     id: '1',
     name: 'Jenkins CI',
@@ -309,6 +274,10 @@ const apiKeys = ref([
     lastUsed: '2026-01-02 10:30'
   }
 ])
+
+watch(apiKeys, (newKeys) => {
+  localStorage.setItem('api_keys', JSON.stringify(newKeys))
+}, { deep: true })
 
 const handleRevokeKey = (id: string) => {
   apiKeys.value = apiKeys.value.filter(key => key.id !== id)
@@ -347,6 +316,18 @@ const handleGenerateKey = () => {
     lastUsed: '未使用'
   })
 }
+
+const isUsageDialogOpen = ref(false)
+
+const curlExample = `curl -X POST "http://your-platform.com/api/openapi/v1/run-plan" \\
+  -H "X-API-KEY: sk_test_..." \\
+  -H "Content-Type: application/json" \\
+  -d '{ 
+        "planId": "PLAN_1001", 
+        "environment": "Test", 
+        "callbackUrl": "http://jenkins.com/webhook/job-123" 
+      }'`
+
 const handleAddVariable = () => {
     variables.value.push({
         key: 'NEW_VAR',
@@ -483,29 +464,57 @@ const handleDeleteParameter = (index: number) => {
                 <div v-for="(variable, index) in variables.slice().reverse()" :key="index" class="flex items-start gap-4 p-4 border border-gray-100 rounded-lg hover:bg-gray-50">
                   <div class="flex-1 grid grid-cols-1 md:grid-cols-12 gap-4">
                     <div class="col-span-3 space-y-1">
-                      <div class="flex items-center gap-2">
+                      <div class="flex items-center justify-between mb-1">
                         <Label class="text-xs text-gray-500">变量名</Label>
-                        <Badge v-if="variable.isAuto" variant="secondary" class="h-4 px-1 text-[10px] bg-blue-100 text-blue-700 hover:bg-blue-100 border-none cursor-help" :title="`来源: ${variable.extractConfig?.sourceApi} (${variable.extractConfig?.expression})`">自动更新</Badge>
+                        <div class="flex items-center gap-1.5">
+                          <Switch v-model="variable.isAuto" class="scale-75 origin-right" />
+                          <span class="text-[10px] text-gray-400 font-medium">{{ variable.isAuto ? '自动回写' : '手动' }}</span>
+                        </div>
                       </div>
                       <Input v-model="variable.key" class="font-mono text-blue-600" />
                     </div>
                     <div class="col-span-5 space-y-1">
                       <Label class="text-xs text-gray-500">变量值</Label>
-                      <Input v-model="variable.value" />
+                      <Input v-model="variable.value" :disabled="variable.isAuto" :class="variable.isAuto ? 'bg-gray-50 text-gray-500' : ''" />
                     </div>
                     <div class="col-span-4 space-y-1">
                       <Label class="text-xs text-gray-500">描述</Label>
                       <Input v-model="variable.description" />
                     </div>
+                    
+                    <!-- Auto Update Configuration -->
+                    <div v-if="variable.isAuto" class="col-span-12 grid grid-cols-12 gap-4 mt-1 p-3 bg-blue-50/50 rounded-md border border-blue-100 animate-in fade-in slide-in-from-top-1">
+                      <div class="col-span-3 space-y-1">
+                        <Label class="text-[10px] font-medium text-blue-600">提取来源</Label>
+                        <Select v-model="variable.sourceType">
+                          <SelectTrigger class="h-8 text-xs bg-white border-blue-200 focus:ring-blue-200">
+                            <SelectValue placeholder="选择来源" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="api">API 响应提取</SelectItem>
+                            <SelectItem value="db">数据库查询</SelectItem>
+                            <SelectItem value="script">自定义脚本</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div class="col-span-9 space-y-1">
+                        <Label class="text-[10px] font-medium text-blue-600">提取规则 (JSONPath / SQL / Script)</Label>
+                        <div class="flex gap-2">
+                          <Input 
+                            v-model="variable.sourceExpression" 
+                            class="h-8 text-xs font-mono bg-white border-blue-200 focus-visible:ring-blue-200" 
+                            :placeholder="variable.sourceType === 'db' ? 'SELECT value FROM table WHERE key=...' : variable.sourceType === 'script' ? 'return customized_value' : 'data.token'" 
+                          />
+                          <Button size="sm" variant="outline" class="h-8 px-3 text-xs text-blue-600 border-blue-200 hover:bg-blue-100 hover:text-blue-700">
+                            测试
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  <div class="flex flex-col gap-2 mt-5">
-                    <Button variant="ghost" size="icon" class="text-gray-400 hover:text-blue-500 h-8 w-8" @click="handleOpenVariableConfig(variable)">
-                        <Link class="w-4 h-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" class="text-gray-400 hover:text-red-500 h-8 w-8" @click="handleDeleteVariable(index)">
-                        <Trash2 class="w-4 h-4" />
-                    </Button>
-                  </div>
+                  <Button variant="ghost" size="icon" class="mt-5 text-gray-400 hover:text-red-500" @click="handleDeleteVariable(index)">
+                    <Trash2 class="w-4 h-4" />
+                  </Button>
                 </div>
               </div>
             </CardContent>
@@ -618,15 +627,49 @@ const handleDeleteParameter = (index: number) => {
                   </Button>
                 </div>
               </div>
-              <Button class="w-full" variant="outline" @click="handleGenerateKey">
-                <Plus class="w-4 h-4 mr-2" />
-                生成新密钥
-              </Button>
+              <div class="flex gap-4">
+                <Button class="flex-1" variant="outline" @click="handleGenerateKey">
+                  <Plus class="w-4 h-4 mr-2" />
+                  生成新密钥
+                </Button>
+                <Button class="flex-1" variant="secondary" @click="isUsageDialogOpen = true">
+                  <BookOpen class="w-4 h-4 mr-2" />
+                  查看使用文档
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>
       </TabsContent>
     </Tabs>
+
+    <Dialog :open="isUsageDialogOpen" @update:open="isUsageDialogOpen = $event">
+      <DialogContent class="sm:max-w-[600px]">
+        <DialogHeader>
+          <DialogTitle>OpenAPI 调用指南</DialogTitle>
+          <DialogDescription>
+            通过 HTTP 接口触发测试计划
+          </DialogDescription>
+        </DialogHeader>
+        <div class="space-y-4 py-4">
+          <div class="space-y-2">
+            <Label>1. 鉴权方式</Label>
+            <p class="text-sm text-gray-500">
+              在请求头中添加 <code class="bg-gray-100 px-1 rounded text-purple-600 font-mono">X-API-KEY</code>
+            </p>
+          </div>
+          <div class="space-y-2">
+            <Label>2. 调用示例 (cURL)</Label>
+            <div class="relative bg-gray-900 rounded-lg p-4 font-mono text-xs text-green-400 overflow-x-auto">
+              <pre>{{ curlExample }}</pre>
+              <Button variant="ghost" size="icon" class="absolute top-2 right-2 text-gray-400 hover:text-white" @click="copyToClipboard(curlExample)">
+                <Copy class="w-4 h-4" />
+              </Button>
+            </div>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
 
     <Dialog :open="isEnvDialogOpen" @update:open="isEnvDialogOpen = $event">
       <DialogContent class="sm:max-w-[800px] max-h-[90vh] flex flex-col">
@@ -694,66 +737,6 @@ const handleDeleteParameter = (index: number) => {
         <DialogFooter>
           <Button variant="outline" @click="isEnvDialogOpen = false">取消</Button>
           <Button @click="handleSaveEnv">保存</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-
-    <!-- Variable Config Dialog -->
-    <Dialog :open="isVariableConfigOpen" @update:open="isVariableConfigOpen = $event">
-      <DialogContent class="sm:max-w-[500px]">
-        <DialogHeader>
-          <DialogTitle>变量自动更新配置</DialogTitle>
-          <DialogDescription>
-            配置变量如何从接口响应中自动提取并更新
-          </DialogDescription>
-        </DialogHeader>
-        <div class="py-4 space-y-6">
-          <div class="flex items-center justify-between">
-            <div class="space-y-0.5">
-              <Label>启用自动更新</Label>
-              <div class="text-xs text-gray-500">开启后，该变量将通过下方规则自动获取值</div>
-            </div>
-            <Switch :checked="variableConfigForm.isAuto" @update:checked="variableConfigForm.isAuto = $event" />
-          </div>
-          
-          <div v-if="variableConfigForm.isAuto" class="space-y-4 pt-4 border-t">
-            <div class="space-y-2">
-              <Label>来源接口 (API)</Label>
-              <Input v-model="variableConfigForm.sourceApi" placeholder="例如：用户登录接口 / login" />
-              <div class="text-xs text-gray-500">描述该变量来自哪个接口，便于维护</div>
-            </div>
-
-            <div class="grid grid-cols-2 gap-4">
-              <div class="space-y-2">
-                <Label>提取方式</Label>
-                <Select v-model="variableConfigForm.method">
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="json">JSON Path</SelectItem>
-                    <SelectItem value="regex">正则表达式</SelectItem>
-                    <SelectItem value="header">响应头 (Header)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div class="space-y-2">
-                <Label>提取表达式</Label>
-                <Input v-model="variableConfigForm.expression" placeholder="例如：$.data.token" />
-              </div>
-            </div>
-            
-            <div class="bg-gray-50 p-3 rounded text-xs text-gray-500 space-y-1">
-              <div class="font-medium">示例说明：</div>
-              <div v-if="variableConfigForm.method === 'json'">JSON Path: <code class="bg-gray-200 px-1 rounded">$.data.token</code> 提取 { "data": { "token": "..." } }</div>
-              <div v-if="variableConfigForm.method === 'regex'">Regex: <code class="bg-gray-200 px-1 rounded">"token":"(.*?)"</code> 提取匹配组</div>
-              <div v-if="variableConfigForm.method === 'header'">Header: <code class="bg-gray-200 px-1 rounded">Authorization</code> 提取响应头</div>
-            </div>
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" @click="isVariableConfigOpen = false">取消</Button>
-          <Button @click="handleSaveVariableConfig">保存配置</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

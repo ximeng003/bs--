@@ -32,9 +32,21 @@ public class TestPlan implements Serializable {
     @TableField("test_case_ids")
     private String testCaseIds;
 
+    @TableField("project_id")
+    private Integer projectId;
+
+    @TableField("created_by")
+    private Integer createdBy;
+
     @TableField(value = "created_at", fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
 
     @TableField(value = "updated_at", fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updatedAt;
+
+    @TableField("last_run_status")
+    private String lastRunStatus;
+
+    @TableField("last_run_time")
+    private LocalDateTime lastRunTime;
 }

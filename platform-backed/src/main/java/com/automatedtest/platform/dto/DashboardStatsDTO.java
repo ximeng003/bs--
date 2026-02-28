@@ -1,5 +1,6 @@
 package com.automatedtest.platform.dto;
 
+import com.automatedtest.platform.entity.TestPlan;
 import lombok.Data;
 import java.util.List;
 
@@ -13,4 +14,8 @@ public class DashboardStatsDTO {
     
     private List<DailyTrendDTO> dailyTrend;
     private List<RecentActivityDTO> recentActivity;
+    
+    // New fields for workbench snapshot
+    private List<TestPlan> myRunningTasks;
+    private List<TestPlan> myFailedPlans;
 }

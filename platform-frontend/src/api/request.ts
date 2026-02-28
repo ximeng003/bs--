@@ -22,6 +22,13 @@ request.interceptors.request.use(
       } catch {
       }
     }
+    
+    const projectId = localStorage.getItem('currentProjectId')
+    if (projectId) {
+       if (!config.headers) config.headers = {} as any
+       (config.headers as any)['X-Project-Id'] = projectId
+    }
+
     return config
   },
   error => {

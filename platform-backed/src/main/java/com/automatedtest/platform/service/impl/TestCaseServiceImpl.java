@@ -8,7 +8,13 @@ import com.automatedtest.platform.entity.TestReport;
 import com.automatedtest.platform.mapper.TestCaseMapper;
 import com.automatedtest.platform.service.TestCaseService;
 import com.automatedtest.platform.service.TestReportService;
+import com.automatedtest.platform.entity.User;
+import com.automatedtest.platform.entity.UserVariable;
+import com.automatedtest.platform.service.UserService;
+import com.automatedtest.platform.service.UserVariableService;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpEntity;
@@ -27,6 +33,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @Service
@@ -38,12 +45,88 @@ public class TestCaseServiceImpl extends ServiceImpl<TestCaseMapper, TestCase> i
     @Autowired
     private TestReportService testReportService;
 
+    @Autowired
+    private UserService userService;
+
+    @Autowired
+    private UserVariableService userVariableService;
+
+    @Autowired
+    private com.automatedtest.platform.service.SystemVariableService systemVariableService;
+
+    @Autowired
+    private com.automatedtest.platform.service.ProjectVariableService projectVariableService;
+
     @Override
     public ApiTestResponseDTO executeApiTest(ApiTestRequestDTO request) {
+        return executeApiTest(request, null);
+    }
+
+    @Override
+    public ApiTestResponseDTO executeApiTest(ApiTestRequestDTO request, Long userId) {
+        return executeApiTest(request, userId, null);
+    }
+
+    @Override
+    public ApiTestResponseDTO executeApiTest(ApiTestRequestDTO request, Long userId, Integer projectId) {
         ApiTestResponseDTO responseDTO = new ApiTestResponseDTO();
         long startTime = System.currentTimeMillis();
 
         try {
+            // Variable Substitution
+            Map<String, String> varMap = new HashMap<>();
+
+            // 1. System Variables (Global Level)
+            List<com.automatedtest.platform.entity.SystemVariable> systemVars = systemVariableService.list();
+            if (systemVars != null) {
+                for (com.automatedtest.platform.entity.SystemVariable var : systemVars) {
+                    if (var.getKeyName() != null && var.getValue() != null) {
+                        varMap.put(var.getKeyName(), var.getValue());
+                    }
+                }
+            }
+
+            // 2. Project Variables (Project Level - Override System)
+            if (projectId != null) {
+                List<com.automatedtest.platform.entity.ProjectVariable> projectVars = projectVariableService.list(
+                        new QueryWrapper<com.automatedtest.platform.entity.ProjectVariable>().eq("project_id", projectId)
+                );
+                if (projectVars != null) {
+                    for (com.automatedtest.platform.entity.ProjectVariable var : projectVars) {
+                        if (var.getKeyName() != null && var.getValue() != null) {
+                            varMap.put(var.getKeyName(), var.getValue());
+                        }
+                    }
+                }
+            }
+
+            // 3. User Variables (Personal Level - Override Project/System)
+            if (userId != null) {
+                List<UserVariable> variables = userVariableService.list(new QueryWrapper<UserVariable>().eq("user_id", userId));
+                if (variables != null) {
+                    for (UserVariable var : variables) {
+                        if (var.getKeyName() != null && var.getValue() != null) {
+                            varMap.put(var.getKeyName(), var.getValue());
+                        }
+                    }
+                }
+            }
+
+            // Apply Variables
+            if (!varMap.isEmpty()) {
+                String json = objectMapper.writeValueAsString(request);
+                for (Map.Entry<String, String> entry : varMap.entrySet()) {
+                    String val = entry.getValue()
+                            .replace("\\", "\\\\")
+                            .replace("\"", "\\\"")
+                            .replace("\n", "\\n")
+                            .replace("\r", "\\r");
+                    // Support {{KEY}} syntax
+                    json = json.replace("{{" + entry.getKey() + "}}", val);
+                }
+                request = objectMapper.readValue(json, ApiTestRequestDTO.class);
+            }
+
             // 1. Build URL with params
             UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(request.getUrl());
             if (request.getParams() != null) {
@@ -128,6 +211,57 @@ public class TestCaseServiceImpl extends ServiceImpl<TestCaseMapper, TestCase> i
         CaseExecuteResultDTO result = new CaseExecuteResultDTO();
         Map<String, Object> contentMap = new HashMap<>();
         String content = testCase.getContent();
+        
+        // Variable Substitution
+        Map<String, String> varMap = new HashMap<>();
+
+        // 1. System Variables (Global Level)
+        List<com.automatedtest.platform.entity.SystemVariable> systemVars = systemVariableService.list();
+        if (systemVars != null) {
+            for (com.automatedtest.platform.entity.SystemVariable var : systemVars) {
+                if (var.getKeyName() != null && var.getValue() != null) {
+                    varMap.put(var.getKeyName(), var.getValue());
+                }
+            }
+        }
+        
+        // 2. Project Variables (Project Level - Override System)
+        if (testCase.getProjectId() != null) {
+            List<com.automatedtest.platform.entity.ProjectVariable> projectVars = projectVariableService.list(
+                new QueryWrapper<com.automatedtest.platform.entity.ProjectVariable>().eq("project_id", testCase.getProjectId())
+            );
+            if (projectVars != null) {
+                for (com.automatedtest.platform.entity.ProjectVariable var : projectVars) {
+                    if (var.getKeyName() != null && var.getValue() != null) {
+                        varMap.put(var.getKeyName(), var.getValue());
+                    }
+                }
+            }
+        }
+
+        // 3. User Variables (Private Level - Override Project & System)
+        if (executedBy != null && !executedBy.trim().isEmpty()) {
+             User user = userService.getOne(new QueryWrapper<User>().eq("username", executedBy));
+             if (user != null) {
+                 List<UserVariable> variables = userVariableService.list(new QueryWrapper<UserVariable>().eq("user_id", user.getId()));
+                 if (variables != null) {
+                     for (UserVariable var : variables) {
+                         if (var.getKeyName() != null && var.getValue() != null) {
+                             varMap.put(var.getKeyName(), var.getValue());
+                         }
+                     }
+                 }
+             }
+        }
+        
+        // 4. Apply Substitution
+        if (!varMap.isEmpty() && content != null) {
+             for (Map.Entry<String, String> entry : varMap.entrySet()) {
+                 String val = entry.getValue().replace("\\", "\\\\").replace("\"", "\\\"");
+                 content = content.replace("{{" + entry.getKey() + "}}", val);
+             }
+        }
+        
         if (content != null && content.trim().length() > 0) {
             try {
                 contentMap = objectMapper.readValue(content, Map.class);
@@ -197,6 +331,9 @@ public class TestCaseServiceImpl extends ServiceImpl<TestCaseMapper, TestCase> i
         updateById(testCase);
 
         TestReport report = new TestReport();
+        if (testCase.getProjectId() != null) {
+            report.setProjectId(testCase.getProjectId());
+        }
         if (planId != null) {
             report.setPlanId(planId);
         }

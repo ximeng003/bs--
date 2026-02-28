@@ -1,7 +1,9 @@
 package com.automatedtest.platform.controller;
 
 import com.automatedtest.platform.common.Result;
+import com.automatedtest.platform.common.UserContext;
 import com.automatedtest.platform.dto.DashboardStatsDTO;
+import com.automatedtest.platform.entity.User;
 import com.automatedtest.platform.service.DashboardService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -17,6 +19,10 @@ public class DashboardController {
 
     @GetMapping("/stats")
     public Result<DashboardStatsDTO> getStats() {
-        return Result.success(dashboardService.getDashboardStats());
+        User user = UserContext.getCurrentUser();
+        String username = user != null ? user.getUsername() : null;
+        Integer projectId = UserContext.getCurrentProjectId();
+        
+        return Result.success(dashboardService.getDashboardStats(username, projectId));
     }
 }

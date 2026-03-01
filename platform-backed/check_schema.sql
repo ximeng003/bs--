@@ -1,0 +1,2 @@
+USE automated_test_platform;
+DESCRIBE login_logs;

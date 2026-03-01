@@ -2,6 +2,7 @@ com\automatedtest\platform\service\impl\SystemVariableServiceImpl.class
 com\automatedtest\platform\mapper\TestCaseMapper.class
 com\automatedtest\platform\controller\AuthController.class
 com\automatedtest\platform\entity\ProjectMember.class
+com\automatedtest\platform\common\UserContext.class
 com\automatedtest\platform\service\impl\ProjectServiceImpl.class
 com\automatedtest\platform\config\MybatisPlusConfig$AuditMetaObjectHandler.class
 com\automatedtest\platform\controller\ProjectApiKeyController.class
@@ -23,6 +24,7 @@ com\automatedtest\platform\mapper\UserApiKeyMapper.class
 com\automatedtest\platform\controller\ProjectVariableController.class
 com\automatedtest\platform\service\impl\DashboardServiceImpl.class
 com\automatedtest\platform\controller\TestPlanController.class
+com\automatedtest\platform\config\WebMvcConfig.class
 com\automatedtest\platform\mapper\EnvironmentMapper.class
 com\automatedtest\platform\entity\Environment.class
 com\automatedtest\platform\mapper\ProjectApiKeyMapper.class
@@ -65,6 +67,7 @@ com\automatedtest\platform\service\OperationLogService.class
 com\automatedtest\platform\controller\OperationLogController.class
 com\automatedtest\platform\controller\EnvironmentController.class
 com\automatedtest\platform\service\SystemVariableService.class
+com\automatedtest\platform\interceptor\AuthenticationInterceptor.class
 com\automatedtest\platform\util\WebhookClient.class
 com\automatedtest\platform\mapper\TestReportMapper.class
 com\automatedtest\platform\PlatformApplication.class

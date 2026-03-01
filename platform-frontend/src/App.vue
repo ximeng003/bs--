@@ -39,6 +39,7 @@ onUnmounted(() => {
     if (path.startsWith('/web-app')) return 'web-app'
     if (path.startsWith('/plans')) return 'plans'
     if (path.startsWith('/reports')) return 'report'
+    if (path.startsWith('/project-settings')) return 'project-settings'
     if (path.startsWith('/settings')) return 'settings'
     return 'dashboard'
   })
@@ -51,6 +52,7 @@ const pageTitle = computed(() => {
   if (route.name === 'ReportDetail') return '测试报告详情'
   if (route.name === 'Reports') return '测试报告'
   if (route.name === 'TestPlans') return '测试计划'
+  if (route.name === 'ProjectSettings') return '项目设置'
   if (route.name === 'Settings') return '系统设置'
   return '工作台'
 })
@@ -67,6 +69,7 @@ const showLayout = computed(() => {
       case 'web-app': router.push('/web-app'); break;
       case 'plans': router.push('/plans'); break;
       case 'report': router.push('/reports'); break;
+      case 'project-settings': router.push('/project-settings'); break;
       case 'settings': router.push('/settings'); break;
     }
   }

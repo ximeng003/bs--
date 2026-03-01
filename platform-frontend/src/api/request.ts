@@ -17,7 +17,7 @@ request.interceptors.request.use(
           if (!config.headers) {
             config.headers = {} as any
           }
-          ;(config.headers as any)['X-User-Name'] = user.username
+          ;(config.headers as any)['X-User-Name'] = encodeURIComponent(user.username)
         }
       } catch {
       }
@@ -51,6 +51,30 @@ request.interceptors.response.use(
   },
   error => {
     console.error('Request Error:', error)
+    
+    // Auto-recovery for 404 caused by invalid project context
+     if (error.response && error.response.status === 404) {
+        const currentProjectId = localStorage.getItem('currentProjectId')
+        if (currentProjectId) {
+           // Prevent infinite reload loops
+           const lastReload = sessionStorage.getItem('last_404_reload')
+           const now = Date.now()
+           if (lastReload && (now - parseInt(lastReload) < 5000)) {
+              console.warn('Loop detected: 404 reload prevented.')
+              return Promise.reject(error)
+           }
+           
+           console.warn('Received 404 with active Project ID. Clearing invalid project context to recover.')
+           localStorage.removeItem('currentProjectId')
+           sessionStorage.setItem('last_404_reload', now.toString())
+           
+           // Reloading the page to reset state is the safest way to recover
+           setTimeout(() => {
+              window.location.reload()
+           }, 500)
+        }
+     }
+    
     return Promise.reject(error)
   }
 )

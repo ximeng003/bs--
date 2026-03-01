@@ -24,6 +24,28 @@ import { Badge } from '@/components/ui/badge'
 const router = useRouter()
 const projectStore = useProjectStore()
 
+// Avatar Logic
+const avatarStyles = [
+  { label: '卡通', value: 'avataaars' },
+  { label: '机器人', value: 'bottts' },
+  { label: '简笔画', value: 'open-peeps' },
+  { label: '几何', value: 'shapes' },
+  { label: '像素', value: 'pixel-art' },
+  { label: '首字母', value: 'initials' }
+]
+
+const currentAvatarStyle = ref('avataaars')
+
+const refreshAvatar = () => {
+  const seed = Math.random().toString(36).substring(7)
+  profileForm.value.avatar = `https://api.dicebear.com/7.x/${currentAvatarStyle.value}/svg?seed=${seed}`
+}
+
+const changeAvatarStyle = (style: string) => {
+  currentAvatarStyle.value = style
+  refreshAvatar()
+}
+
 // Profile Data
 const profileForm = ref({
   nickname: '',
@@ -167,14 +189,23 @@ const handleRemoveMember = async (userId: number) => {
   }
 }
 
-const handleUpdateMemberRole = async (member: any, newRole: string) => {
-  const roleName = newRole === 'admin' ? '管理员' : '普通成员'
-  if (!confirm(`确定要将 ${member.username} 的角色设置为 ${roleName} 吗？`)) return
+const showRoleConfirmDialog = ref(false)
+const roleConfirmData = ref<{ member: any, newRole: string } | null>(null)
 
+const handleUpdateMemberRole = (member: any, newRole: string) => {
+  roleConfirmData.value = { member, newRole }
+  showRoleConfirmDialog.value = true
+}
+
+const confirmUpdateRole = async () => {
+  if (!roleConfirmData.value) return
+  const { member, newRole } = roleConfirmData.value
+  
   try {
     await request.put(`/teams/${currentTeam.value.id}/members/${member.id}`, { role: newRole })
     showToast('角色更新成功', 'success')
     fetchTeamMembers(currentTeam.value.id)
+    showRoleConfirmDialog.value = false
   } catch (e: any) {
     showToast(e.message || '更新失败', 'error')
   }
@@ -376,6 +407,32 @@ const saveApiKeys = () => {
   // Deprecated: using backend
 }
 
+const handleDeleteTeam = async (id: number) => {
+  if (!confirm('确定要删除该团队吗？这将同时删除所有团队成员，但必须先删除团队下的项目。')) return
+  try {
+    await request.delete(`/teams/${id}`)
+    showToast('团队删除成功', 'success')
+    fetchTeams()
+  } catch (e: any) {
+    showToast(e.message || '删除失败', 'error')
+  }
+}
+
+const handleDeleteProject = async (id: number) => {
+  if (!confirm('确定要删除该项目吗？此操作不可恢复。')) return
+  try {
+    await request.delete(`/projects/${id}`)
+    showToast('项目删除成功', 'success')
+    projectStore.fetchProjects()
+    if (projectStore.currentProject?.id === id) {
+      projectStore.setCurrentProject(null)
+      window.location.reload()
+    }
+  } catch (e: any) {
+    showToast(e.message || '删除失败', 'error')
+  }
+}
+
 const copyToClipboard = (text: string) => {
   navigator.clipboard.writeText(text).then(() => {
     showToast('已复制到剪贴板', 'success')
@@ -384,12 +441,19 @@ const copyToClipboard = (text: string) => {
   })
 }
 
+const getTeamName = (teamId: number) => {
+  if (!teamId) return '-'
+  const team = teams.value.find(t => t.id === teamId)
+  return team ? team.name : '-'
+}
+
 onMounted(() => {
   fetchProfile()
   fetchLogs()
   fetchVariables()
   loadApiKeys()
   fetchTeams()
+  projectStore.fetchProjects()
 })
 </script>
 
@@ -432,17 +496,38 @@ onMounted(() => {
             <CardDescription>更新您的个人基本资料</CardDescription>
           </CardHeader>
           <CardContent class="space-y-6">
-            <div class="flex items-center gap-6 pb-6 border-b">
-              <div class="w-24 h-24 rounded-full bg-blue-100 flex items-center justify-center border-4 border-white shadow-lg overflow-hidden">
+            <div class="flex flex-col md:flex-row items-center gap-6 pb-6 border-b">
+              <div class="w-32 h-32 rounded-full bg-blue-100 flex items-center justify-center border-4 border-white shadow-lg overflow-hidden shrink-0">
                 <img 
-                  :src="profileForm.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${userStore.user?.username || 'user'}`" 
+                  :src="profileForm.avatar || `https://api.dicebear.com/7.x/${currentAvatarStyle}/svg?seed=${userStore.user?.username || 'user'}`" 
                   alt="Avatar"
                   class="w-full h-full object-cover"
                 />
               </div>
-              <div class="space-y-2 flex-1">
-                 <Label>头像链接</Label>
-                 <Input v-model="profileForm.avatar" placeholder="输入头像 URL" />
+              <div class="space-y-4 flex-1 w-full">
+                 <div class="space-y-2">
+                   <Label>选择头像风格</Label>
+                   <div class="flex flex-wrap gap-2">
+                     <Button 
+                       v-for="style in avatarStyles" 
+                       :key="style.value"
+                       variant="outline" 
+                       size="sm"
+                       :class="{'bg-primary text-primary-foreground hover:bg-primary/90': currentAvatarStyle === style.value}"
+                       @click="changeAvatarStyle(style.value)"
+                     >
+                       {{ style.label }}
+                     </Button>
+                   </div>
+                 </div>
+                 <div class="flex items-center gap-2">
+                   <Button variant="secondary" size="sm" @click="refreshAvatar">
+                     <RefreshCw class="w-4 h-4 mr-2" /> 随机生成
+                   </Button>
+                   <div class="text-xs text-muted-foreground ml-2">
+                     点击上方风格或随机生成按钮更换头像
+                   </div>
+                 </div>
               </div>
             </div>
             
@@ -636,6 +721,7 @@ onMounted(() => {
               </CardContent>
             </Card>
           </TabsContent>
+        </Tabs>
             
         <!-- Simple Dialog/Modal for Variable Editing -->
         <div v-if="showVarDialog" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -734,6 +820,7 @@ onMounted(() => {
                     <TableCell>{{ new Date(team.createdAt).toLocaleDateString() }}</TableCell>
                     <TableCell class="text-right">
                       <Button variant="ghost" size="sm" @click="openTeamSettings(team)">管理</Button>
+                      <Button variant="ghost" size="sm" class="text-red-600 ml-2" @click="handleDeleteTeam(team.id)">删除</Button>
                     </TableCell>
                   </TableRow>
                   <TableRow v-if="teams.length === 0">
@@ -761,6 +848,7 @@ onMounted(() => {
                     <TableHead>项目名称</TableHead>
                     <TableHead>描述</TableHead>
                     <TableHead>角色</TableHead>
+                    <TableHead>归属团队</TableHead>
                     <TableHead class="text-right">操作</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -776,6 +864,7 @@ onMounted(() => {
                     <TableCell>
                       <Badge variant="outline">{{ project.role || 'Member' }}</Badge>
                     </TableCell>
+                    <TableCell>{{ getTeamName(project.teamId) }}</TableCell>
                     <TableCell class="text-right">
                       <Button 
                         variant="ghost" 
@@ -784,6 +873,14 @@ onMounted(() => {
                         @click="switchToProject(project)"
                       >
                         切换
+                      </Button>
+                      <Button 
+                        variant="ghost" 
+                        size="sm"
+                        class="text-red-600 ml-2" 
+                        @click="handleDeleteProject(project.id)"
+                      >
+                        删除
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -946,6 +1043,26 @@ onMounted(() => {
       </div>
     </div>
 
+
+    <!-- Role Change Confirmation Dialog -->
+    <div v-if="showRoleConfirmDialog" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
+      <div class="bg-white rounded-lg p-6 w-full max-w-sm shadow-xl">
+        <h3 class="text-lg font-semibold mb-2">确认角色变更</h3>
+        <p class="text-gray-600 mb-6">
+          确定要将用户 
+          <span class="font-bold text-gray-900">{{ roleConfirmData?.member?.username }}</span> 
+          的角色设置为 
+          <span class="font-bold text-blue-600">{{ roleConfirmData?.newRole === 'admin' ? '管理员' : '普通成员' }}</span> 
+          吗？
+        </p>
+        <div class="flex justify-end gap-2">
+          <Button variant="outline" @click="showRoleConfirmDialog = false">取消</Button>
+          <Button @click="confirmUpdateRole" :variant="roleConfirmData?.newRole === 'admin' ? 'default' : 'secondary'">
+            确认变更
+          </Button>
+        </div>
+      </div>
+    </div>
 
     </Tabs>
   </div>

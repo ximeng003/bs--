@@ -1,6 +1,7 @@
 package com.automatedtest.platform.controller;
 
 import com.automatedtest.platform.common.UserContext;
+import com.automatedtest.platform.annotation.OperationAudit;
 import com.automatedtest.platform.common.Result;
 import com.automatedtest.platform.dto.ApiTestRequestDTO;
 import com.automatedtest.platform.dto.ApiTestResponseDTO;
@@ -236,9 +237,6 @@ public class TestCaseController {
         qw.eq("created_by", user.getId());
         qw.eq("project_id", contextProjectId);
         
-        return Result.success(testCaseService.remove(qw));
-    }
-        qw.eq("created_by", user.getId());
         return Result.success(testCaseService.remove(qw));
     }
 }

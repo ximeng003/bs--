@@ -75,7 +75,7 @@ const filteredMenuItems = computed(() => {
       <div class="text-xs text-gray-500 mb-2 font-medium uppercase tracking-wider px-2">当前项目</div>
       <Select :model-value="projectStore.currentProject?.id?.toString()" @update:model-value="handleProjectChange">
         <SelectTrigger class="w-full bg-[#1f2d3d] text-white border-[#3d4c63] hover:bg-[#263445]">
-          <SelectValue placeholder="请选择项目" />
+          <span class="truncate text-left flex-1">{{ projectStore.currentProject?.name || '请选择项目' }}</span>
         </SelectTrigger>
         <SelectContent class="bg-[#1f2d3d] border-[#3d4c63] text-white">
           <SelectItem 
@@ -115,22 +115,5 @@ const filteredMenuItems = computed(() => {
         </li>
       </ul>
     </nav>
-
-    <!-- User Profile / Footer -->
-    <div class="px-4 py-4 border-t border-[#2b3648] bg-[#263445]/50 shrink-0">
-      <div class="flex items-center gap-3 px-2">
-        <div class="w-8 h-8 rounded-full bg-gradient-to-tr from-primary to-purple-500 flex items-center justify-center text-xs font-bold shadow-inner">
-          {{ user?.nickname?.charAt(0) || user?.username?.charAt(0) || 'U' }}
-        </div>
-        <div class="flex-1 min-w-0">
-          <div class="text-sm font-medium truncate">{{ user?.nickname || user?.username }}</div>
-          <div class="text-xs text-gray-500 truncate capitalize">{{ user?.role || 'User' }}</div>
-        </div>
-      </div>
-      <div class="mt-4 px-2 text-[10px] text-gray-500 flex justify-between">
-        <div>v2.0.1</div>
-        <div>© 2026 Automation</div>
-      </div>
-    </div>
   </aside>
 </template>

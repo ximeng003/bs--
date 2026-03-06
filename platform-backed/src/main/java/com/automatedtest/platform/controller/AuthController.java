@@ -6,6 +6,8 @@ import com.automatedtest.platform.service.UserService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 import com.automatedtest.platform.service.LoginLogService;
+import com.automatedtest.platform.service.JwtService;
+import com.automatedtest.platform.dto.LoginResponseDTO;
 import javax.servlet.http.HttpServletRequest;
 import java.time.LocalDateTime;
 
@@ -18,13 +20,22 @@ public class AuthController {
 
     @Autowired
     private LoginLogService loginLogService;
+    @Autowired
+    private JwtService jwtService;
 
     @PostMapping("/login")
-    public Result<User> login(@RequestBody User loginUser, HttpServletRequest request) {
+    public Result<LoginResponseDTO> login(@RequestBody User loginUser, HttpServletRequest request) {
         User user = userService.login(loginUser.getUsername(), loginUser.getPassword());
         String ip = request.getRemoteAddr();
         
         if (user != null) {
+            if (user.getRole() != null) {
+                String role = user.getRole().trim().toLowerCase();
+                if ("disabled".equals(role)) {
+                    loginLogService.recordLogin(user.getId(), user.getUsername(), ip, "disabled");
+                    return Result.error("账户已停用");
+                }
+            }
             // Record success
             loginLogService.recordLogin(user.getId(), user.getUsername(), ip, "success");
             
@@ -32,8 +43,12 @@ public class AuthController {
             user.setLastLoginAt(LocalDateTime.now());
             user.setLastLoginIp(ip);
             userService.updateById(user);
-            
-            return Result.success(user);
+            String token = jwtService.generateToken(user.getUsername(), user.getRole());
+            user.setPassword(null);
+            LoginResponseDTO dto = new LoginResponseDTO();
+            dto.setToken(token);
+            dto.setUser(user);
+            return Result.success(dto);
         } else {
             // Record failure (if we knew the username, but here we might only have what was submitted)
             // Ideally we'd look up the user by username to get ID, but if login fails, maybe user doesn't exist.

@@ -11,4 +11,7 @@ public class CaseExecuteResultDTO {
     private String error;
     private Map<String, Object> response;
     private Integer reportId;
+    private Integer assertsTotal;
+    private Integer assertsPassed;
+    private Integer assertsFailed;
 }

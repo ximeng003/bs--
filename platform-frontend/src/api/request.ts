@@ -12,21 +12,28 @@ request.interceptors.request.use(
     if (userStr) {
       try {
         const parsed = JSON.parse(userStr)
-        const user = parsed && parsed.username ? parsed : (parsed.data || parsed)
-        if (user && user.username) {
+        const stored = parsed.data || parsed
+        const token = stored?.token
+        if (token) {
           if (!config.headers) {
             config.headers = {} as any
           }
-          ;(config.headers as any)['X-User-Name'] = encodeURIComponent(user.username)
+          ;(config.headers as any)['Authorization'] = `Bearer ${token}`
         }
-      } catch {
-      }
+      } catch {}
     }
     
     const projectId = localStorage.getItem('currentProjectId')
-    if (projectId) {
-       if (!config.headers) config.headers = {} as any
-       (config.headers as any)['X-Project-Id'] = projectId
+    const url = config.url || ''
+    const isGlobalEndpoint =
+      url.startsWith('/projects') ||
+      url.startsWith('/teams') ||
+      url.startsWith('/user') ||
+      url.startsWith('/auth')
+
+    if (projectId && !isGlobalEndpoint) {
+      if (!config.headers) config.headers = {} as any
+      ;(config.headers as any)['X-Project-Id'] = projectId
     }
 
     return config

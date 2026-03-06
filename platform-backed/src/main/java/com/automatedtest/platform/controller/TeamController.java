@@ -8,7 +8,7 @@ import com.automatedtest.platform.entity.User;
 import com.automatedtest.platform.service.TeamMemberService;
 import com.automatedtest.platform.service.TeamService;
 import com.automatedtest.platform.service.UserService;
-// import com.automatedtest.platform.service.ProjectService;
+import com.automatedtest.platform.service.ProjectService;
 import com.automatedtest.platform.entity.Project;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,8 +32,8 @@ public class TeamController {
     @Autowired
     private UserService userService;
 
-    // @Autowired
-    // private ProjectService projectService;
+    @Autowired
+    private ProjectService projectService;
 
     @GetMapping
     public Result<List<Team>> list() {
@@ -43,16 +43,16 @@ public class TeamController {
         }
 
         if ("admin".equalsIgnoreCase(user.getRole())) {
-            return Result.success(teamService.list());
+            return Result.success(teamService.lambdaQuery().eq(Team::getIsDeleted, false).list());
         }
 
-        List<TeamMember> memberships = teamMemberService.list(new QueryWrapper<TeamMember>().eq("user_id", user.getId()));
+        List<TeamMember> memberships = teamMemberService.list(new QueryWrapper<TeamMember>().eq("user_id", user.getId().intValue()));
         if (memberships.isEmpty()) {
             return Result.success(Collections.emptyList());
         }
         
         List<Integer> teamIds = memberships.stream().map(TeamMember::getTeamId).collect(Collectors.toList());
-        List<Team> teams = teamService.listByIds(teamIds);
+        List<Team> teams = teamService.lambdaQuery().in(Team::getId, teamIds).eq(Team::getIsDeleted, false).list();
         return Result.success(teams);
     }
 
@@ -60,6 +60,14 @@ public class TeamController {
     public Result<Team> create(@RequestBody Team team) {
         User user = UserContext.getCurrentUser();
         if (user == null) return Result.error("未登录");
+
+        // Quota Check
+        if (!"admin".equalsIgnoreCase(user.getRole())) {
+            long teamCount = teamService.count(new QueryWrapper<Team>().eq("created_by", user.getId()));
+            if (teamCount >= user.getMaxTeams()) {
+                return Result.error("已达到团队创建数量上限(" + user.getMaxTeams() + ")");
+            }
+        }
         
         team.setCreatedBy(user.getId().intValue());
         teamService.save(team);
@@ -81,7 +89,7 @@ public class TeamController {
         
         TeamMember currentMember = teamMemberService.getOne(new QueryWrapper<TeamMember>()
             .eq("team_id", id)
-            .eq("user_id", user.getId()));
+            .eq("user_id", user.getId().intValue()));
             
         boolean isAdmin = "admin".equalsIgnoreCase(user.getRole());
         if (!isAdmin && (currentMember == null || !"admin".equalsIgnoreCase(currentMember.getRole()))) {
@@ -123,7 +131,7 @@ public class TeamController {
         
         TeamMember currentMember = teamMemberService.getOne(new QueryWrapper<TeamMember>()
             .eq("team_id", id)
-            .eq("user_id", user.getId()));
+            .eq("user_id", user.getId().intValue()));
             
         boolean isAdmin = "admin".equalsIgnoreCase(user.getRole());
         if (!isAdmin && currentMember == null) {
@@ -157,7 +165,7 @@ public class TeamController {
         
         TeamMember currentMember = teamMemberService.getOne(new QueryWrapper<TeamMember>()
             .eq("team_id", id)
-            .eq("user_id", user.getId()));
+            .eq("user_id", user.getId().intValue()));
             
         boolean isAdmin = "admin".equalsIgnoreCase(user.getRole());
         if (!isAdmin && (currentMember == null || !"admin".equalsIgnoreCase(currentMember.getRole()))) {
@@ -193,23 +201,21 @@ public class TeamController {
         if (!isSystemAdmin) {
             TeamMember currentMember = teamMemberService.getOne(new QueryWrapper<TeamMember>()
                 .eq("team_id", id)
-                .eq("user_id", user.getId()));
+                .eq("user_id", user.getId().intValue()));
             
             if (currentMember == null || !"admin".equalsIgnoreCase(currentMember.getRole())) {
                 return Result.error("无权限删除团队");
             }
         }
 
-        // TODO: Check for associated projects (pending ProjectService injection fix)
-        // long projectCount = projectService.count(new QueryWrapper<Project>().eq("team_id", id));
-        // if (projectCount > 0) {
-        //     return Result.error("该团队下存在项目，请先删除项目");
-        // }
-        
-        // Delete team members
+        team.setIsDeleted(true);
+        teamService.updateById(team);
+        projectService.lambdaUpdate().eq(com.automatedtest.platform.entity.Project::getTeamId, id)
+                .set(com.automatedtest.platform.entity.Project::getStatus, "archived")
+                .set(com.automatedtest.platform.entity.Project::getIsDeleted, true)
+                .update();
         teamMemberService.remove(new QueryWrapper<TeamMember>().eq("team_id", id));
-
-        return Result.success(teamService.removeById(id));
+        return Result.success(true);
     }
 
     @PutMapping("/{id}/members/{memberId}")

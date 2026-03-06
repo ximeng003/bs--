@@ -30,6 +30,9 @@ interface ReportDetail {
   executedAt?: string | null
   executedBy?: string | null
   environment?: string | null
+  assertsTotal?: number | null
+  assertsPassed?: number | null
+  assertsFailed?: number | null
 }
 
 interface PlanItemForReport {
@@ -148,6 +151,88 @@ const consoleLogs = computed<ConsoleLog[]>(() => {
   })
 })
 
+const totalAssertions = computed<number>(() => {
+  try {
+    const content: any = parsedCaseContent.value as any
+    if (content && typeof content === 'object' && Array.isArray(content.assertions)) {
+      return content.assertions.filter((a: any) => a == null || a.active !== false).length
+    }
+  } catch {}
+  return 0
+})
+
+const assertsSummaryText = computed(() => {
+  const r = report.value
+  if (r && typeof r.assertsTotal === 'number' && typeof r.assertsPassed === 'number') {
+    return `${r.assertsPassed}/${r.assertsTotal} 通过`
+  }
+  const total = totalAssertions.value
+  if (total > 0) {
+    return `${total} 条`
+  }
+  return ''
+})
+
+// Plan item logs tools
+const isPlanLogFullscreen = ref(false)
+const planLogSearch = ref('')
+const planFilteredLogText = computed(() => {
+  const logs: string[] = Array.isArray(selectedReportItem.value?.logs) ? selectedReportItem.value.logs : []
+  if (!logs.length) return ''
+  const kw = (planLogSearch.value || '').trim().toLowerCase()
+  const lines = logs.join('\n').split(/\r?\n/)
+  if (!kw) return lines.join('\n')
+  return lines.filter(l => l.toLowerCase().includes(kw)).join('\n')
+})
+const copyPlanLogs = async () => {
+  const text = planFilteredLogText.value
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      showToast('已复制日志', 'success')
+      return
+    }
+  } catch {}
+  const ta = document.createElement('textarea')
+  ta.value = text
+  ta.style.position = 'fixed'
+  ta.style.opacity = '0'
+  document.body.appendChild(ta)
+  ta.select()
+  document.execCommand('copy')
+  document.body.removeChild(ta)
+  showToast('已复制日志', 'success')
+}
+
+// Single report console log tools
+const isSingleLogFullscreen = ref(false)
+const singleLogSearch = ref('')
+const singleFilteredLogText = computed(() => {
+  const list = consoleLogs.value || []
+  const combined = list.map(l => `[${l.time}] ${l.message}`).join('\n')
+  const kw = (singleLogSearch.value || '').trim().toLowerCase()
+  if (!kw) return combined
+  return combined.split(/\r?\n/).filter(l => l.toLowerCase().includes(kw)).join('\n')
+})
+const copySingleLogs = async () => {
+  const text = singleFilteredLogText.value
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      showToast('已复制日志', 'success')
+      return
+    }
+  } catch {}
+  const ta = document.createElement('textarea')
+  ta.value = text
+  ta.style.position = 'fixed'
+  ta.style.opacity = '0'
+  document.body.appendChild(ta)
+  ta.select()
+  document.execCommand('copy')
+  document.body.removeChild(ta)
+  showToast('已复制日志', 'success')
+}
 const apiErrorText = computed(() => {
   const lines = logLines.value
   if (!lines.length) {
@@ -750,6 +835,47 @@ const fetchAndProcessItem = async (item: PlanItemForReport) => {
       method = (testCaseContent.method || 'GET').toUpperCase()
       requestBody = testCaseContent.body || ''
       requestHeaders = testCaseContent.headers || {}
+    // Try evaluate assertions on client for display
+    try {
+      const assertions = Array.isArray(testCaseContent.assertions) ? testCaseContent.assertions : []
+      const body = responseBody || ''
+      let json: any = null
+      if (typeof body === 'string') {
+        const trimmed = body.trim()
+        if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+          try { json = JSON.parse(trimmed) } catch {}
+        }
+      }
+      const evaluated = assertions.map((a: any) => {
+        const active = a == null || a.active !== false
+        if (!active) return { ...a, _result: 'skip' }
+        let ok = false
+        let actual: any = undefined
+        if (String(a.type || '').toLowerCase() === 'status') {
+          actual = statusCode
+          ok = String(a.value) === String(actual)
+        } else if (String(a.type || '').toLowerCase() === 'jsonpath' && json && typeof a.path === 'string' && a.path.startsWith('$.')) {
+          let node: any = json
+          const parts = a.path.substring(2).split('.')
+          for (const part of parts) {
+            if (node == null) break
+            node = node[part]
+          }
+          if (node != null) {
+            actual = (typeof node === 'object') ? JSON.stringify(node) : String(node)
+            ok = String(a.value) === String(actual)
+          }
+        }
+        return { ...a, _result: ok ? 'pass' : 'fail', _actual: actual }
+      })
+      if (!Array.isArray((testCaseContent as any).assertions)) {
+        ;(testCaseContent as any).assertions = evaluated
+      } else {
+        for (let i = 0; i < evaluated.length; i++) {
+          (testCaseContent as any).assertions[i] = evaluated[i]
+        }
+      }
+    } catch {}
     } else if (logLines.length > 0) {
       // 尝试从日志第一行提取 method url
       // 假设日志格式: POST http://...
@@ -1016,7 +1142,7 @@ const handleShare = async () => {
               <!-- Tabs -->
               <div class="flex border-b bg-white sticky top-0 z-10">
                 <button 
-                  v-for="tab in ['steps', 'request', 'response', 'logs']" 
+                  v-for="tab in ['steps', 'request', 'response', 'assertions', 'logs']" 
                   :key="tab"
                   @click="currentTab = tab"
                   class="px-4 py-2 text-sm font-medium border-b-2 transition-colors capitalize"
@@ -1081,16 +1207,49 @@ const handleShare = async () => {
                   </div>
                 </div>
 
+                <!-- Assertions Tab -->
+                <div v-else-if="currentTab === 'assertions'" class="space-y-2">
+                  <div class="text-xs text-gray-500 mb-1">断言结果</div>
+                  <div class="grid grid-cols-12 text-xs text-gray-500 border-b border-gray-100 pb-2">
+                    <div class="col-span-2">类型</div>
+                    <div class="col-span-3">路径/字段</div>
+                    <div class="col-span-3">期望值</div>
+                    <div class="col-span-3">实际值</div>
+                    <div class="col-span-1 text-right">结果</div>
+                  </div>
+                  <div v-for="(a, idx) in (Array.isArray((parsedCaseContent as any)?.assertions) ? (parsedCaseContent as any).assertions : [])"
+                       :key="idx"
+                       class="grid grid-cols-12 items-center text-sm py-2 border-b border-gray-50">
+                    <div class="col-span-2 text-xs">{{ (a.type || '').toUpperCase() }}</div>
+                    <div class="col-span-3 text-xs break-all">{{ a.path || '-' }}</div>
+                    <div class="col-span-3 text-xs break-all">{{ a.value != null ? String(a.value) : '-' }}</div>
+                    <div class="col-span-3 text-xs break-all text-gray-600">{{ a._actual != null ? String(a._actual) : '-' }}</div>
+                    <div class="col-span-1 text-right">
+                      <span v-if="a._result === 'pass'" class="inline-flex items-center px-2 py-0.5 rounded-full border text-xs text-green-700 bg-green-50 border-green-200">通过</span>
+                      <span v-else-if="a._result === 'fail'" class="inline-flex items-center px-2 py-0.5 rounded-full border text-xs text-red-700 bg-red-50 border-red-200">失败</span>
+                      <span v-else class="inline-flex items-center px-2 py-0.5 rounded-full border text-xs text-gray-700 bg-gray-50 border-gray-200">未知</span>
+                    </div>
+                  </div>
+                  <div v-if="!(Array.isArray((parsedCaseContent as any)?.assertions) && (parsedCaseContent as any).assertions.length)" class="text-center text-gray-400 py-8">
+                    未配置断言
+                  </div>
+                </div>
+
                 <!-- Logs Tab -->
                 <div v-else-if="currentTab === 'logs'" class="space-y-2">
-                  <div 
-                    v-for="(log, idx) in selectedReportItem.logs" 
-                    :key="idx"
-                    class="font-mono text-xs p-2 rounded bg-white border border-gray-100 break-all"
-                  >
-                    {{ log }}
+                  <div class="flex items-center justify-between">
+                    <div class="text-xs text-gray-500">日志输出</div>
+                    <div class="flex items-center gap-2">
+                      <input v-model="planLogSearch" placeholder="搜索日志" class="border rounded h-7 px-2 text-xs" />
+                      <button @click="copyPlanLogs" class="border rounded h-7 px-2 text-xs bg-white hover:bg-gray-50">复制</button>
+                      <button @click="isPlanLogFullscreen = !isPlanLogFullscreen" class="border rounded h-7 px-2 text-xs bg-white hover:bg-gray-50">
+                        {{ isPlanLogFullscreen ? '退出全屏' : '全屏' }}
+                      </button>
+                    </div>
                   </div>
-                  <div v-if="!selectedReportItem.logs?.length" class="text-center text-gray-400 py-8">暂无日志</div>
+                  <pre 
+                    :class="['bg-gray-900 text-green-400 rounded p-3 text-xs font-mono whitespace-pre-wrap overflow-y-auto', isPlanLogFullscreen ? 'min-h-[360px]' : 'min-h-[180px]']"
+                  >{{ planFilteredLogText || '暂无日志' }}</pre>
                 </div>
               </div>
             </div>
@@ -1122,6 +1281,7 @@ const handleShare = async () => {
               <span>耗时: {{ reportData.duration }}</span>
               <span>引擎: {{ reportData.engine }}</span>
               <span>环境: {{ reportData.environment }}</span>
+              <span v-if="assertsSummaryText">断言: {{ assertsSummaryText }}</span>
             </div>
           </div>
           <div class="flex gap-2">
@@ -1218,22 +1378,17 @@ const handleShare = async () => {
         <!-- Console Logs -->
         <Card class="border-gray-200">
           <CardContent class="pt-6">
-            <h3 class="font-semibold text-gray-900 mb-4">控制台日志</h3>
-            <div class="bg-gray-900 text-green-400 p-4 rounded font-mono text-xs h-[300px] overflow-y-auto">
-              <div
-                v-for="(log, index) in consoleLogs"
-                :key="index"
-                :class="`mb-1 ${
-                  log.level === 'error'
-                    ? 'text-red-400'
-                    : log.level === 'success'
-                    ? 'text-green-400'
-                    : 'text-gray-400'
-                }`"
-              >
-                <span class="text-gray-500">[{{ log.time }}]</span> {{ log.message }}
+            <div class="flex items-center justify-between mb-2">
+              <h3 class="font-semibold text-gray-900">控制台日志</h3>
+              <div class="flex items-center gap-2">
+                <input v-model="singleLogSearch" placeholder="搜索日志" class="border rounded h-7 px-2 text-xs" />
+                <button @click="copySingleLogs" class="border rounded h-7 px-2 text-xs bg-white hover:bg-gray-50">复制</button>
+                <button @click="isSingleLogFullscreen = !isSingleLogFullscreen" class="border rounded h-7 px-2 text-xs bg-white hover:bg-gray-50">
+                  {{ isSingleLogFullscreen ? '退出全屏' : '全屏' }}
+                </button>
               </div>
             </div>
+            <pre :class="['bg-gray-900 text-green-400 p-4 rounded font-mono text-xs overflow-y-auto whitespace-pre-wrap', isSingleLogFullscreen ? 'h-[460px]' : 'h-[300px]']">{{ singleFilteredLogText || '暂无日志' }}</pre>
           </CardContent>
         </Card>
 

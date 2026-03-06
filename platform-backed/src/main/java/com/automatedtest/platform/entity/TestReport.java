@@ -40,6 +40,15 @@ public class TestReport implements Serializable {
     @TableField("executed_by")
     private String executedBy;
 
+    @TableField("asserts_total")
+    private Integer assertsTotal;
+
+    @TableField("asserts_passed")
+    private Integer assertsPassed;
+
+    @TableField("asserts_failed")
+    private Integer assertsFailed;
+
     @TableField(exist = false)
     private String caseName;
 
@@ -51,4 +60,7 @@ public class TestReport implements Serializable {
 
     @TableField(exist = false)
     private String caseType;
+
+    @TableField("is_deleted")
+    private Boolean isDeleted;
 }

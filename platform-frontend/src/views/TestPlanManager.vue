@@ -81,7 +81,7 @@ const handleDelete = async (id: string) => {
     await request.delete(`/plans/${id}`)
     fetchTestPlans()
     showToast('删除成功', 'success')
-  } catch (e) {
+  } catch (_e) {
     showToast('删除失败', 'error')
   }
 }
@@ -101,7 +101,7 @@ const handleBatchDelete = async () => {
     await Promise.all(selectedPlanIds.value.map(id => request.delete(`/plans/${id}`)))
     selectedPlanIds.value = []
     await fetchTestPlans()
-  } catch (e) {
+  } catch (_e) {
     showToast('批量删除失败', 'error')
   }
 }
@@ -148,13 +148,18 @@ const handleExecute = async (id: string) => {
     if (plan) {
       plan.lastRun = nowStr
     }
-    if (res && typeof res.planSummaryReportId === 'number') {
-      router.push({ path: `/reports/${res.planSummaryReportId}` })
+    if (res && typeof res === 'object') {
+      const key = `plan-summary-${id}-${Date.now()}`
+      try {
+        sessionStorage.setItem(key, JSON.stringify(res))
+      } catch {}
+      router.push({ path: '/plan-reports', query: { planId: String(id), key } })
     } else {
-      showToast('执行完成，但未返回计划报告 ID', 'warning')
+      showToast('执行完成，正在跳转到报告列表', 'info')
+      router.push('/reports')
     }
-  } catch (e) {
-    console.error(e)
+  } catch (_e) {
+    console.error(_e)
     showToast('执行计划失败', 'error')
   }
 }
@@ -181,7 +186,7 @@ const handleDuplicatePlan = async (plan: TestPlan) => {
     await request.post('/plans', payload)
     showToast('复制计划成功', 'success')
     fetchTestPlans()
-  } catch (e) {
+  } catch (_e) {
     showToast('复制计划失败', 'error')
   }
 }
@@ -202,7 +207,7 @@ const handleCopyPlan = async (plan: TestPlan) => {
       document.body.removeChild(textarea)
     }
     showToast('复制成功', 'success')
-  } catch (e) {
+  } catch (_e) {
     showToast('复制失败', 'error')
   }
 }
@@ -323,7 +328,7 @@ const copyToClipboard = async (text: string) => {
       document.body.removeChild(textarea)
       showToast('复制成功', 'success')
     }
-  } catch (e) {
+  } catch (_e) {
     showToast('复制失败', 'error')
   }
 }

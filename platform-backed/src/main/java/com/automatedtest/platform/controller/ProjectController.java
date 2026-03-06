@@ -34,7 +34,7 @@ public class ProjectController {
         }
 
         if ("admin".equalsIgnoreCase(user.getRole())) {
-            List<Project> projects = projectService.list();
+            List<Project> projects = projectService.lambdaQuery().eq(Project::getIsDeleted, false).list();
             projects.forEach(p -> p.setRole("admin"));
             return Result.success(projects);
         }
@@ -48,7 +48,7 @@ public class ProjectController {
         List<Integer> teamIds = memberships.stream().map(TeamMember::getTeamId).collect(Collectors.toList());
         
         // Find projects belonging to these teams
-        List<Project> projects = projectService.lambdaQuery().in(Project::getTeamId, teamIds).list();
+        List<Project> projects = projectService.lambdaQuery().in(Project::getTeamId, teamIds).eq(Project::getIsDeleted, false).list();
         
         // Populate role from team membership
         for (Project project : projects) {
@@ -58,6 +58,35 @@ public class ProjectController {
                 .ifPresent(m -> project.setRole(m.getRole()));
         }
         
+        return Result.success(projects);
+    }
+
+    @GetMapping("/archived")
+    public Result<List<Project>> listArchived() {
+        User user = UserContext.getCurrentUser();
+        if (user == null) {
+            return Result.error("未登录");
+        }
+        if ("admin".equalsIgnoreCase(user.getRole())) {
+            List<Project> projects = projectService.lambdaQuery().eq(Project::getIsDeleted, true).list();
+            projects.forEach(p -> p.setRole("admin"));
+            return Result.success(projects);
+        }
+        List<TeamMember> memberships = teamMemberService.lambdaQuery().eq(TeamMember::getUserId, user.getId()).list();
+        if (memberships.isEmpty()) {
+            return Result.success(Collections.emptyList());
+        }
+        List<Integer> teamIds = memberships.stream().map(TeamMember::getTeamId).collect(Collectors.toList());
+        List<Project> projects = projectService.lambdaQuery()
+                .in(Project::getTeamId, teamIds)
+                .eq(Project::getIsDeleted, true)
+                .list();
+        for (Project project : projects) {
+            memberships.stream()
+                    .filter(m -> m.getTeamId().equals(project.getTeamId()))
+                    .findFirst()
+                    .ifPresent(m -> project.setRole(m.getRole()));
+        }
         return Result.success(projects);
     }
 
@@ -71,6 +100,14 @@ public class ProjectController {
         User user = UserContext.getCurrentUser();
         if (user == null) return Result.error("未登录");
         
+        // Quota Check
+        if (!"admin".equalsIgnoreCase(user.getRole())) {
+            long projectCount = projectService.count(new QueryWrapper<Project>().eq("created_by", user.getId()));
+            if (projectCount >= user.getMaxProjects()) {
+                return Result.error("已达到项目创建数量上限(" + user.getMaxProjects() + ")");
+            }
+        }
+
         // Check if user is a member of the team
         TeamMember member = teamMemberService.lambdaQuery()
                 .eq(TeamMember::getTeamId, project.getTeamId())
@@ -100,7 +137,7 @@ public class ProjectController {
         if (user != null && !"admin".equalsIgnoreCase(user.getRole())) {
              long count = teamMemberService.count(new QueryWrapper<TeamMember>()
                     .eq("team_id", project.getTeamId())
-                    .eq("user_id", user.getId()));
+                    .eq("user_id", user.getId().intValue()));
              if (count == 0) return Result.error("无权访问该项目");
         }
         return Result.success(project);
@@ -148,6 +185,28 @@ public class ProjectController {
                  return Result.error("只有团队管理员可以删除项目");
              }
         }
-        return Result.success(projectService.removeById(id));
+        existing.setStatus("archived");
+        existing.setIsDeleted(true);
+        return Result.success(projectService.updateById(existing));
+    }
+
+    @PutMapping("/{id}/restore")
+    @OperationAudit(module = "Project", operation = "Restore Project")
+    public Result<Boolean> restore(@PathVariable Integer id) {
+        Project existing = projectService.getById(id);
+        if (existing == null) return Result.error("项目不存在");
+        User user = UserContext.getCurrentUser();
+        if (user != null && !"admin".equalsIgnoreCase(user.getRole())) {
+            TeamMember member = teamMemberService.lambdaQuery()
+                    .eq(TeamMember::getTeamId, existing.getTeamId())
+                    .eq(TeamMember::getUserId, user.getId())
+                    .one();
+            if (member == null || !"admin".equalsIgnoreCase(member.getRole())) {
+                return Result.error("只有团队管理员可以恢复项目");
+            }
+        }
+        existing.setStatus("active");
+        existing.setIsDeleted(false);
+        return Result.success(projectService.updateById(existing));
     }
 }

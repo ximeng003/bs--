@@ -56,6 +56,12 @@ public class TestCaseServiceImpl extends ServiceImpl<TestCaseMapper, TestCase> i
 
     @Autowired
     private com.automatedtest.platform.service.ProjectVariableService projectVariableService;
+    
+    @Autowired
+    private com.automatedtest.platform.service.EnvironmentService environmentService;
+    
+    @Autowired
+    private com.automatedtest.platform.service.TestPlanService testPlanService;
 
     @Override
     public ApiTestResponseDTO executeApiTest(ApiTestRequestDTO request) {
@@ -108,6 +114,24 @@ public class TestCaseServiceImpl extends ServiceImpl<TestCaseMapper, TestCase> i
                         if (var.getKeyName() != null && var.getValue() != null) {
                             varMap.put(var.getKeyName(), var.getValue());
                         }
+                    }
+                }
+            }
+            
+            if (projectId != null) {
+                com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<com.automatedtest.platform.entity.Environment> ew =
+                        new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<com.automatedtest.platform.entity.Environment>()
+                                .eq("project_id", projectId)
+                                .eq("active", true)
+                                .orderByDesc("id")
+                                .last("LIMIT 1");
+                com.automatedtest.platform.entity.Environment env = environmentService.getOne(ew);
+                if (env != null) {
+                    if (env.getBaseUrl() != null) {
+                        varMap.put("baseUrl", env.getBaseUrl());
+                    }
+                    if (env.getDatabaseName() != null) {
+                        varMap.put("databaseName", env.getDatabaseName());
                     }
                 }
             }
@@ -182,6 +206,11 @@ public class TestCaseServiceImpl extends ServiceImpl<TestCaseMapper, TestCase> i
             responseDTO.setTime(System.currentTimeMillis() - startTime);
         }
 
+        // Redact secrets from response body using variables map (best effort)
+        String body = responseDTO.getBody();
+        if (body != null) {
+            responseDTO.setBody(redactSecrets(body, new HashMap<>())); // lightweight for API ad-hoc
+        }
         return responseDTO;
     }
 
@@ -254,6 +283,32 @@ public class TestCaseServiceImpl extends ServiceImpl<TestCaseMapper, TestCase> i
              }
         }
         
+        String envKey = null;
+        if (planId != null) {
+            com.automatedtest.platform.entity.TestPlan plan = testPlanService.getById(planId);
+            if (plan != null && plan.getEnvironment() != null && !plan.getEnvironment().trim().isEmpty()) {
+                envKey = plan.getEnvironment().trim();
+            }
+        }
+        if (envKey == null || envKey.trim().isEmpty()) {
+            envKey = testCase.getEnvironment();
+        }
+        if (envKey != null && !envKey.trim().isEmpty() && testCase.getProjectId() != null) {
+            com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<com.automatedtest.platform.entity.Environment> ew =
+                    new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<com.automatedtest.platform.entity.Environment>()
+                            .eq("project_id", testCase.getProjectId())
+                            .eq("key_name", envKey)
+                            .eq("active", true);
+            com.automatedtest.platform.entity.Environment env = environmentService.getOne(ew);
+            if (env != null) {
+                if (env.getBaseUrl() != null) {
+                    varMap.put("baseUrl", env.getBaseUrl());
+                }
+                if (env.getDatabaseName() != null) {
+                    varMap.put("databaseName", env.getDatabaseName());
+                }
+            }
+        }
         // 4. Apply Substitution
         if (!varMap.isEmpty() && content != null) {
              for (Map.Entry<String, String> entry : varMap.entrySet()) {
@@ -285,7 +340,7 @@ public class TestCaseServiceImpl extends ServiceImpl<TestCaseMapper, TestCase> i
         Map<String, Object> payload = new HashMap<>();
         payload.put("caseId", testCase.getId());
         payload.put("type", testCase.getType());
-        payload.put("environment", testCase.getEnvironment());
+        payload.put("environment", envKey);
         payload.put("content", contentMap);
         String output = "";
         try {
@@ -356,7 +411,7 @@ public class TestCaseServiceImpl extends ServiceImpl<TestCaseMapper, TestCase> i
                 logsToSave = logsToSave + System.lineSeparator() + result.getError();
             }
         }
-        report.setLogs(logsToSave);
+        report.setLogs(redactSecrets(logsToSave, varMap));
         report.setExecutedAt(LocalDateTime.now());
         if (executedBy != null && !executedBy.trim().isEmpty()) {
             report.setExecutedBy(executedBy.trim());
@@ -368,6 +423,100 @@ public class TestCaseServiceImpl extends ServiceImpl<TestCaseMapper, TestCase> i
             result.setReportId(report.getId());
         }
 
+        // Lightweight assertion evaluation for API cases (status & simple $.a.b jsonpath)
+        try {
+            if ("API".equalsIgnoreCase(testCase.getType())) {
+                Object assertionsObj = contentMap.get("assertions");
+                int total = 0, passed = 0;
+                if (assertionsObj instanceof java.util.List) {
+                    java.util.List<?> arr = (java.util.List<?>) assertionsObj;
+                    Object respMapObj = result.getResponse();
+                    Integer statusCode = null;
+                    String bodyStr = null;
+                    if (respMapObj instanceof java.util.Map) {
+                        @SuppressWarnings("unchecked")
+                        java.util.Map<String, Object> respMap = (java.util.Map<String, Object>) respMapObj;
+                        Object sc = respMap.get("statusCode");
+                        if (sc instanceof Number) {
+                            statusCode = ((Number) sc).intValue();
+                        } else if (sc != null) {
+                            try { statusCode = Integer.parseInt(sc.toString()); } catch (Exception ignored) {}
+                        }
+                        Object b = respMap.get("body");
+                        if (b != null) bodyStr = b.toString();
+                    }
+                    com.fasterxml.jackson.databind.JsonNode jsonBody = null;
+                    if (bodyStr != null) {
+                        String trimmed = bodyStr.trim();
+                        if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+                            try { jsonBody = objectMapper.readTree(trimmed); } catch (Exception ignored) {}
+                        }
+                    }
+                    for (Object it : arr) {
+                        if (!(it instanceof java.util.Map)) continue;
+                        @SuppressWarnings("unchecked")
+                        java.util.Map<String, Object> a = (java.util.Map<String, Object>) it;
+                        Object active = a.get("active");
+                        if (active != null && active instanceof Boolean && !((Boolean) active)) {
+                            continue;
+                        }
+                        total++;
+                        String type = a.get("type") != null ? a.get("type").toString() : "";
+                        String path = a.get("path") != null ? a.get("path").toString() : "";
+                        String value = a.get("value") != null ? a.get("value").toString() : null;
+                        boolean ok = false;
+                        if ("status".equalsIgnoreCase(type)) {
+                            if (statusCode != null && value != null && value.equals(String.valueOf(statusCode))) {
+                                ok = true;
+                            }
+                        } else if ("jsonpath".equalsIgnoreCase(type) && jsonBody != null && value != null) {
+                            if (path != null && path.startsWith("$.")) {
+                                String p = path.substring(2); // remove "$."
+                                String[] parts = p.split("\\.");
+                                com.fasterxml.jackson.databind.JsonNode node = jsonBody;
+                                for (String part : parts) {
+                                    if (node == null) break;
+                                    node = node.get(part);
+                                }
+                                if (node != null) {
+                                    String actual = node.isValueNode() ? node.asText() : node.toString();
+                                    ok = value.equals(actual);
+                                }
+                            }
+                        }
+                        if (ok) passed++;
+                    }
+                    result.setAssertsTotal(total);
+                    result.setAssertsPassed(passed);
+                    result.setAssertsFailed(total - passed);
+                    // Persist to report
+                    report.setAssertsTotal(result.getAssertsTotal());
+                    report.setAssertsPassed(result.getAssertsPassed());
+                    report.setAssertsFailed(result.getAssertsFailed());
+                    testReportService.updateById(report);
+                }
+            }
+        } catch (Exception ignored) {
+        }
+
         return result;
+    }
+
+    private String redactSecrets(String text, Map<String, String> varMap) {
+        if (text == null || text.isEmpty()) return text;
+        String redacted = text;
+        if (varMap != null && !varMap.isEmpty()) {
+            for (Map.Entry<String, String> entry : varMap.entrySet()) {
+                String val = entry.getValue();
+                if (val == null) continue;
+                String trimmed = val.trim();
+                if (trimmed.length() < 3) continue;
+                String key = entry.getKey() != null ? entry.getKey().toUpperCase() : "";
+                boolean likelySecret = key.contains("KEY") || key.contains("TOKEN") || key.contains("SECRET") || key.contains("PWD") || key.contains("PASS");
+                if (!likelySecret) continue;
+                redacted = redacted.replace(trimmed, "[ENCRYPTED]");
+            }
+        }
+        return redacted;
     }
 }

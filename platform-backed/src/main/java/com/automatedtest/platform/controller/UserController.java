@@ -15,6 +15,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import javax.servlet.http.HttpServletRequest;
+import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/user")
@@ -58,6 +60,8 @@ public class UserController {
         if (dto.getAvatar() != null) user.setAvatar(dto.getAvatar());
         if (dto.getNotificationWebhook() != null) user.setNotificationWebhook(dto.getNotificationWebhook());
         if (dto.getEnableNotification() != null) user.setEnableNotification(dto.getEnableNotification());
+        if (dto.getNotifyRule() != null) user.setNotificationRule(dto.getNotifyRule());
+        if (dto.getNotifyThreshold() != null) user.setNotificationThreshold(dto.getNotifyThreshold());
 
         userService.updateById(user);
         user.setPassword(null);
@@ -91,5 +95,121 @@ public class UserController {
         queryWrapper.eq("user_id", user.getId());
         queryWrapper.orderByDesc("login_time");
         return Result.success(loginLogService.page(pageParam, queryWrapper));
+    }
+
+    @GetMapping("/pending")
+    public Result<IPage<User>> listPendingUsers(@RequestParam(defaultValue = "1") Integer page,
+                                                @RequestParam(defaultValue = "10") Integer size,
+                                                HttpServletRequest request) {
+        User current = getCurrentUser(request);
+        if (current == null || current.getRole() == null || !"admin".equalsIgnoreCase(current.getRole())) {
+            return Result.error("无权限");
+        }
+        Page<User> pageParam = new Page<>(page, size);
+        QueryWrapper<User> query = new QueryWrapper<>();
+        query.eq("role", "pending");
+        query.orderByDesc("created_at");
+        IPage<User> result = userService.page(pageParam, query);
+        // Hide password for safety
+        if (result.getRecords() != null) {
+            result.getRecords().forEach(u -> u.setPassword(null));
+        }
+        return Result.success(result);
+    }
+
+    @PutMapping("/{id}/approve")
+    @OperationAudit(module = "User", operation = "Approve User")
+    public Result<Boolean> approveUser(@PathVariable Long id, HttpServletRequest request) {
+        User current = getCurrentUser(request);
+        if (current == null || current.getRole() == null || !"admin".equalsIgnoreCase(current.getRole())) {
+            return Result.error("无权限");
+        }
+        User target = userService.getById(id);
+        if (target == null) return Result.error("用户不存在");
+        target.setRole("user");
+        return Result.success(userService.updateById(target));
+    }
+
+    @PutMapping("/{id}/reject")
+    @OperationAudit(module = "User", operation = "Reject User")
+    public Result<Boolean> rejectUser(@PathVariable Long id, HttpServletRequest request) {
+        User current = getCurrentUser(request);
+        if (current == null || current.getRole() == null || !"admin".equalsIgnoreCase(current.getRole())) {
+            return Result.error("无权限");
+        }
+        User target = userService.getById(id);
+        if (target == null) return Result.error("用户不存在");
+        target.setRole("disabled");
+        return Result.success(userService.updateById(target));
+    }
+
+    @PutMapping("/approve-batch")
+    @OperationAudit(module = "User", operation = "Approve Users Batch")
+    public Result<Boolean> approveUsersBatch(@RequestBody Map<String, Object> body, HttpServletRequest request) {
+        User current = getCurrentUser(request);
+        if (current == null || current.getRole() == null || !"admin".equalsIgnoreCase(current.getRole())) {
+            return Result.error("无权限");
+        }
+        Object idsObj = body != null ? body.get("ids") : null;
+        if (!(idsObj instanceof List)) {
+            return Result.error("参数错误");
+        }
+        List<?> ids = (List<?>) idsObj;
+        if (ids.isEmpty()) return Result.success(true);
+
+        for (Object idObj : ids) {
+            if (idObj == null) continue;
+            Long id;
+            if (idObj instanceof Number) {
+                id = ((Number) idObj).longValue();
+            } else {
+                try {
+                    id = Long.parseLong(idObj.toString());
+                } catch (Exception ex) {
+                    continue;
+                }
+            }
+            User target = userService.getById(id);
+            if (target != null) {
+                target.setRole("user");
+                userService.updateById(target);
+            }
+        }
+        return Result.success(true);
+    }
+
+    @PutMapping("/reject-batch")
+    @OperationAudit(module = "User", operation = "Reject Users Batch")
+    public Result<Boolean> rejectUsersBatch(@RequestBody Map<String, Object> body, HttpServletRequest request) {
+        User current = getCurrentUser(request);
+        if (current == null || current.getRole() == null || !"admin".equalsIgnoreCase(current.getRole())) {
+            return Result.error("无权限");
+        }
+        Object idsObj = body != null ? body.get("ids") : null;
+        if (!(idsObj instanceof List)) {
+            return Result.error("参数错误");
+        }
+        List<?> ids = (List<?>) idsObj;
+        if (ids.isEmpty()) return Result.success(true);
+
+        for (Object idObj : ids) {
+            if (idObj == null) continue;
+            Long id;
+            if (idObj instanceof Number) {
+                id = ((Number) idObj).longValue();
+            } else {
+                try {
+                    id = Long.parseLong(idObj.toString());
+                } catch (Exception ex) {
+                    continue;
+                }
+            }
+            User target = userService.getById(id);
+            if (target != null) {
+                target.setRole("disabled");
+                userService.updateById(target);
+            }
+        }
+        return Result.success(true);
     }
 }

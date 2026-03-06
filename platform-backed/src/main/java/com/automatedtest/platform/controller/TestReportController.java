@@ -55,7 +55,7 @@ public class TestReportController {
         
         long count = teamMemberService.count(new QueryWrapper<TeamMember>()
                 .eq("team_id", project.getTeamId())
-                .eq("user_id", userId));
+                .eq("user_id", userId.intValue()));
         return count > 0;
     }
 
@@ -111,6 +111,7 @@ public class TestReportController {
             }
         }
         
+        queryWrapper.eq("is_deleted", 0);
         queryWrapper.orderByDesc("executed_at");
         queryWrapper.orderByDesc("id");
 
@@ -213,6 +214,9 @@ public class TestReportController {
         dto.setLogs(report.getLogs());
         dto.setExecutedAt(report.getExecutedAt());
         dto.setExecutedBy(report.getExecutedBy());
+        dto.setAssertsTotal(report.getAssertsTotal());
+        dto.setAssertsPassed(report.getAssertsPassed());
+        dto.setAssertsFailed(report.getAssertsFailed());
 
         if (report.getCaseId() != null) {
             TestCase testCase = testCaseService.getById(report.getCaseId());
@@ -263,7 +267,8 @@ public class TestReportController {
                 return Result.error("无权限删除该测试报告");
             }
         }
-        return Result.success(testReportService.removeById(id));
+        report.setIsDeleted(true);
+        return Result.success(testReportService.updateById(report));
     }
 
     @DeleteMapping
@@ -290,12 +295,15 @@ public class TestReportController {
         }
         
         if (ids == null || ids.isEmpty()) {
-             // Delete all matching criteria
-             if (contextProjectId == null && !restrictToUser) {
-                 // Prevent accidental "delete all" by admin without filters
-                 return Result.error("批量删除需指定条件"); 
-             }
-             return Result.success(testReportService.remove(queryWrapper));
+            if (contextProjectId == null && !restrictToUser) {
+                return Result.error("批量删除需指定条件");
+            }
+            List<TestReport> toArchive = testReportService.list(queryWrapper);
+            if (toArchive.isEmpty()) return Result.success(true);
+            for (TestReport r : toArchive) {
+                r.setIsDeleted(true);
+            }
+            return Result.success(testReportService.updateBatchById(toArchive));
         }
 
         // Verify count matches
@@ -304,6 +312,11 @@ public class TestReportController {
              return Result.error("部分报告不存在或无权限删除");
         }
         
-        return Result.success(testReportService.removeBatchByIds(ids));
+        List<TestReport> toArchive = testReportService.list(new QueryWrapper<TestReport>().in("id", ids));
+        if (toArchive.isEmpty()) return Result.success(true);
+        for (TestReport r : toArchive) {
+            r.setIsDeleted(true);
+        }
+        return Result.success(testReportService.updateBatchById(toArchive));
     }
 }

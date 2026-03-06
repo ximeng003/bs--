@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import Button from '@/components/ui/button/Button.vue'
@@ -39,6 +39,15 @@ const route = useRoute()
 const router = useRouter()
 
 const summary = ref<PlanSummary | null>(null)
+const loading = ref(false)
+const autoRefresh = ref(false)
+let refreshTimer: number | null = null
+const initialTotal = ref<number | null>(null)
+const completedCount = ref<number>(0)
+const progressRate = computed(() => {
+  if (!initialTotal.value || initialTotal.value <= 0) return 0
+  return Math.round((completedCount.value * 10000) / initialTotal.value) / 100
+})
 
 const successRate = computed(() => {
   const data = summary.value
@@ -113,6 +122,70 @@ const handleBack = () => {
   router.push('/plans')
 }
 
+const rebuildFromReports = (planId: number | string, planName: string, environment: string | undefined, records: any[]) => {
+  if (!Array.isArray(records) || records.length === 0) return
+  // 选取最新的一次运行（按 planRunNo 最大；若为空则按 executed_at/id 最大）
+  let latestRunNo = -1
+  records.forEach(r => {
+    if (typeof r.planRunNo === 'number') {
+      latestRunNo = Math.max(latestRunNo, r.planRunNo)
+    }
+  })
+  let sameRun = records
+  if (latestRunNo >= 0) {
+    sameRun = records.filter(r => r.planRunNo === latestRunNo)
+  }
+  const total = sameRun.length
+  const success = sameRun.filter(r => String(r.status || '').toLowerCase() === 'success').length
+  const failed = total - success
+  const totalDuration = sameRun.reduce((acc, r) => acc + (Number(r.executionTime) || 0), 0)
+  const items: PlanItem[] = sameRun.map((r: any) => ({
+    reportId: r.id,
+    caseId: r.caseId,
+    caseName: r.caseName || r.caseId,
+    type: r.caseType || 'api',
+    status: r.status,
+    durationMs: typeof r.executionTime === 'number' ? r.executionTime : null
+  }))
+  completedCount.value = total
+  summary.value = {
+    planId,
+    planName,
+    environment,
+    total: initialTotal.value ?? total,
+    success,
+    failed,
+    durationMs: totalDuration,
+    avgDurationMs: total > 0 ? Math.round(totalDuration / (initialTotal.value ?? total)) : 0,
+    items
+  }
+}
+
+const refreshFromServer = async () => {
+  const s = summary.value
+  if (!s) return
+  loading.value = true
+  try {
+    const res: any = await (await import('@/api/request')).default.get('/reports', {
+      params: { page: 1, size: 200, planId: s.planId }
+    })
+    if (res && res.records && res.records.length > 0) {
+      rebuildFromReports(s.planId, s.planName, s.environment, res.records)
+    }
+  } catch {}
+  loading.value = false
+}
+
+const setupAutoRefresh = () => {
+  if (refreshTimer != null) {
+    window.clearInterval(refreshTimer)
+    refreshTimer = null
+  }
+  if (autoRefresh.value) {
+    refreshTimer = window.setInterval(refreshFromServer, 3000)
+  }
+}
+
 onMounted(() => {
   const planId = route.query.planId as string | undefined
   const key = route.query.key as string | undefined
@@ -126,9 +199,16 @@ onMounted(() => {
     }
     const parsed = JSON.parse(raw) as PlanSummary
     summary.value = parsed
+    initialTotal.value = typeof parsed.total === 'number' ? parsed.total : null
+    completedCount.value = Array.isArray(parsed.items) ? parsed.items.length : 0
+    // 初始加载后开启一次刷新以与后端对齐
+    refreshFromServer()
   } catch {
   }
+  setupAutoRefresh()
 })
+
+watch(autoRefresh, setupAutoRefresh)
 </script>
 
 <template>
@@ -158,6 +238,15 @@ onMounted(() => {
             <Badge v-if="summary.environment" variant="outline" class="text-xs">
               环境: {{ summary.environment }}
             </Badge>
+            <div class="ml-auto flex items-center gap-2">
+              <Button size="sm" variant="outline" @click="refreshFromServer" :disabled="loading">
+                {{ loading ? '刷新中...' : '手动刷新' }}
+              </Button>
+              <label class="text-xs text-gray-600 flex items-center gap-1">
+                <input type="checkbox" v-model="autoRefresh" />
+                自动刷新
+              </label>
+            </div>
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -195,6 +284,11 @@ onMounted(() => {
               <div class="flex items-center gap-2 text-sm">
                 <span class="text-gray-600">平均单用例耗时：</span>
                 <span class="font-semibold text-gray-900">{{ formatDuration(summary.avgDurationMs) }}</span>
+              </div>
+              <div class="flex items-center gap-2 text-sm" v-if="initialTotal != null">
+                <span class="text-gray-600">执行进度：</span>
+                <span class="font-semibold text-gray-900">{{ completedCount }}/{{ initialTotal }}</span>
+                <span class="text-xs text-gray-400">({{ progressRate }}%)</span>
               </div>
             </div>
             <div class="space-y-2 text-sm text-gray-600">

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { CheckCircle, XCircle, Clock, TrendingUp, RefreshCw, PlayCircle, AlertCircle } from 'lucide-vue-next'
+import { CheckCircle, XCircle, Clock, TrendingUp, RefreshCw, PlayCircle, AlertCircle, Activity } from 'lucide-vue-next'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { PieChart, LineChart, BarChart } from 'echarts/charts'
@@ -214,6 +214,8 @@ const failCount = ref(0)
 const loading = ref(false)
 
 const backendDown = ref(false)
+const healthScore = ref(0)
+const healthMeta = ref({ passRate: 0, coverage: 0, stability: 0 })
 
 const fetchData = async () => {
   if (loading.value) return
@@ -301,6 +303,14 @@ const fetchData = async () => {
     stats.value[3].value = failedCases.toString()
     passCount.value = passedCases
     failCount.value = failedCases
+    
+    // Health score
+    healthScore.value = Number((res as any).healthScore ?? 0)
+    healthMeta.value = {
+      passRate: Number((res as any).passRate ?? 0),
+      coverage: Number((res as any).coverage ?? 0),
+      stability: Number((res as any).stability ?? 0),
+    }
 
     // Update Donut Chart
     const donutData = [
@@ -440,6 +450,34 @@ const handleBarClick = (params: any) => {
         刷新数据
       </Button>
     </div>
+    
+    <Card class="border-gray-200">
+      <CardContent class="py-6">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <Activity class="w-6 h-6 text-indigo-600" />
+            <div>
+              <p class="text-sm text-gray-600">项目质量健康分</p>
+              <div class="text-4xl font-semibold text-gray-900">{{ Math.round(healthScore) }}</div>
+            </div>
+          </div>
+          <div class="grid grid-cols-3 gap-8">
+            <div>
+              <p class="text-xs text-gray-500">通过率</p>
+              <div class="text-lg font-medium text-green-600">{{ Math.round(healthMeta.passRate) }}%</div>
+            </div>
+            <div>
+              <p class="text-xs text-gray-500">覆盖率</p>
+              <div class="text-lg font-medium text-blue-600">{{ Math.round(healthMeta.coverage) }}%</div>
+            </div>
+            <div>
+              <p class="text-xs text-gray-500">稳定性</p>
+              <div class="text-lg font-medium text-purple-600">{{ Math.round(healthMeta.stability) }}%</div>
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
 
     <div v-if="backendDown" class="p-4 rounded-md bg-yellow-50 border border-yellow-200 text-sm text-yellow-700">
       后端服务可能未启动，当前显示的数据为 0。请先运行后台服务，然后刷新页面。

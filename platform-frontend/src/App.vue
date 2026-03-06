@@ -31,18 +31,18 @@ onUnmounted(() => {
 })
 
 // Map routes to sidebar IDs
-  const currentPage = computed(() => {
-    const path = route.path
-    if (path === '/' || path === '/dashboard') return 'dashboard'
-    if (path.startsWith('/api-cases/edit')) return 'api-new'
-    if (path.startsWith('/api-cases')) return 'api'
-    if (path.startsWith('/web-app')) return 'web-app'
-    if (path.startsWith('/plans')) return 'plans'
-    if (path.startsWith('/reports')) return 'report'
-    if (path.startsWith('/project-settings')) return 'project-settings'
-    if (path.startsWith('/settings')) return 'settings'
-    return 'dashboard'
-  })
+const currentPage = computed(() => {
+  const path = route.path
+  if (path === '/' || path === '/dashboard') return 'dashboard'
+  if (path.startsWith('/api-cases/edit')) return 'api-new'
+  if (path.startsWith('/api-cases')) return 'api'
+  if (path.startsWith('/web-app')) return 'web-app'
+  if (path.startsWith('/plans')) return 'plans'
+  if (path.startsWith('/reports')) return 'report'
+  if (path.startsWith('/project-settings')) return 'project-settings'
+  if (path.startsWith('/settings')) return 'settings'
+  return 'dashboard'
+})
 
 const pageTitle = computed(() => {
   if (route.name === 'Dashboard') return '工作台'
@@ -61,18 +61,18 @@ const showLayout = computed(() => {
   return route.meta.layout !== 'blank'
 })
 
-  const handlePageChange = (page: string) => {
-    switch (page) {
-      case 'dashboard': router.push('/'); break;
-      case 'api': router.push('/api-cases'); break;
-      case 'api-new': router.push('/api-cases/edit'); break;
-      case 'web-app': router.push('/web-app'); break;
-      case 'plans': router.push('/plans'); break;
-      case 'report': router.push('/reports'); break;
-      case 'project-settings': router.push('/project-settings'); break;
-      case 'settings': router.push('/settings'); break;
-    }
+const handlePageChange = (page: string) => {
+  switch (page) {
+    case 'dashboard': router.push('/'); break;
+    case 'api': router.push('/api-cases'); break;
+    case 'api-new': router.push('/api-cases/edit'); break;
+    case 'web-app': router.push('/web-app'); break;
+    case 'plans': router.push('/plans'); break;
+    case 'report': router.push('/reports'); break;
+    case 'project-settings': router.push('/project-settings'); break;
+    case 'settings': router.push('/settings'); break;
   }
+}
 
 const handleBack = () => {
   router.back()
@@ -101,7 +101,7 @@ const goToProfile = () => {
     </div>
 
     <div v-else class="flex h-screen bg-gray-50">
-      <Sidebar :currentPage="currentPage" @pageChange="handlePageChange" />
+      <Sidebar :current-page="currentPage" @page-change="handlePageChange" />
       <div class="flex-1 flex flex-col overflow-hidden">
         <header class="bg-white border-b border-gray-200 px-6 py-4">
           <div class="flex items-center justify-between">

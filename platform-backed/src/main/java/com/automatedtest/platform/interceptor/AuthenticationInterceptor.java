@@ -13,6 +13,7 @@ import com.automatedtest.platform.service.UserService;
 import com.automatedtest.platform.service.UserApiKeyService;
 import com.automatedtest.platform.service.ProjectApiKeyService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.automatedtest.platform.service.JwtService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
@@ -37,6 +38,8 @@ public class AuthenticationInterceptor implements HandlerInterceptor {
 
     @Autowired
     private TeamMemberService teamMemberService;
+    @Autowired
+    private JwtService jwtService;
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
@@ -45,6 +48,18 @@ public class AuthenticationInterceptor implements HandlerInterceptor {
         // 1. Resolve User
         User user = null;
         Integer projectKeyProjectId = null;
+
+        String auth = request.getHeader("Authorization");
+        if (auth != null && auth.startsWith("Bearer ")) {
+            String token = auth.substring(7).trim();
+            try {
+                String username = jwtService.parseUsername(token);
+                if (username != null && !username.isEmpty()) {
+                    user = userService.getOne(new QueryWrapper<User>().eq("username", username));
+                }
+            } catch (Exception ignored) {
+            }
+        }
 
         String apiKey = request.getHeader("X-API-KEY");
         if (apiKey != null && !apiKey.trim().isEmpty()) {
@@ -69,32 +84,18 @@ public class AuthenticationInterceptor implements HandlerInterceptor {
             }
         }
 
-        if (user == null) {
-            String username = request.getHeader("X-User-Name");
-            if (username != null && !username.trim().isEmpty()) {
-                try {
-                    // Try to decode in case it is URL encoded (e.g. for Chinese characters)
-                    try {
-                        String decoded = URLDecoder.decode(username, StandardCharsets.UTF_8.name());
-                        if (decoded != null) {
-                            username = decoded;
-                        }
-                    } catch (Exception ignored) {
-                        // If decoding fails, use original username
-                    }
-                    
-                    user = userService.getOne(new QueryWrapper<User>().eq("username", username.trim()));
-                } catch (Exception e) {
-                    System.err.println("Error finding user by username: " + username);
-                    e.printStackTrace();
-                }
-            }
-        }
+        // X-User-Name path removed to avoid header spoofing
 
         if (user != null) {
             UserContext.setCurrentUser(user);
         } else {
              System.out.println("Authentication failed. X-User-Name: " + request.getHeader("X-User-Name"));
+            String uri = request.getRequestURI();
+            boolean isAuthOrPublic = uri.contains("/api/auth/") || uri.contains("/api/public/");
+            if (!isAuthOrPublic) {
+                response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Unauthorized");
+                return false;
+            }
         }
 
         // 2. Resolve Project Context
@@ -125,36 +126,33 @@ public class AuthenticationInterceptor implements HandlerInterceptor {
 
         // 3. Validate Access (if User is present and Project is requested)
         if (projectId != null) {
+            String uri = request.getRequestURI();
+            boolean isGlobalEndpoint =
+                    uri.contains("/api/projects") ||
+                    uri.contains("/api/teams") ||
+                    uri.contains("/api/user") ||
+                    uri.contains("/api/system");
+
+            if (isGlobalEndpoint) {
+                return true;
+            }
+
             Project project = projectService.getById(projectId);
             if (project == null) {
-                // If the project doesn't exist, we should probably return 404
-                // BUT, if it's a "Global" endpoint, we should ignore it.
-                String uri = request.getRequestURI();
-                boolean isGlobalEndpoint = uri.contains("/api/projects") || 
-                                           uri.contains("/api/teams") || 
-                                           uri.contains("/api/user") ||
-                                           uri.contains("/api/system");
-                
-                if (isGlobalEndpoint) {
-                     // Ignore invalid project ID for these global resources
-                     // Do NOT set UserContext.setCurrentProjectId(projectId);
-                } else {
-                    response.sendError(HttpServletResponse.SC_NOT_FOUND, "Project not found");
+                response.sendError(HttpServletResponse.SC_NOT_FOUND, "Project not found");
+                return false;
+            }
+
+            if (user != null && !"admin".equalsIgnoreCase(user.getRole())) {
+                long count = teamMemberService.count(new QueryWrapper<TeamMember>()
+                        .eq("team_id", project.getTeamId())
+                        .eq("user_id", user.getId().intValue()));
+                if (count == 0) {
+                    response.sendError(HttpServletResponse.SC_FORBIDDEN, "You do not have access to this project");
                     return false;
                 }
-            } else {
-                if (user != null && !"admin".equalsIgnoreCase(user.getRole())) {
-                    // Check if user is member of project's team
-                    long count = teamMemberService.count(new QueryWrapper<TeamMember>()
-                            .eq("team_id", project.getTeamId())
-                            .eq("user_id", user.getId()));
-                    if (count == 0) {
-                        response.sendError(HttpServletResponse.SC_FORBIDDEN, "You do not have access to this project");
-                        return false;
-                    }
-                }
-                UserContext.setCurrentProjectId(projectId);
             }
+            UserContext.setCurrentProjectId(projectId);
         }
 
         return true;

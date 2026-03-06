@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { Home, Globe, Monitor, FileText, Settings, CirclePlay, Code, FolderCog } from 'lucide-vue-next';
-import { userStore } from '@/store/userStore'
 import { useProjectStore } from '@/store/projectStore'
 import { computed, onMounted } from 'vue'
 import {
@@ -8,11 +7,9 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from '@/components/ui/select'
 
 const projectStore = useProjectStore()
-const user = userStore.user
 
 onMounted(() => {
   projectStore.fetchProjects()
@@ -46,12 +43,7 @@ const menuItems = [
 ];
 
 const filteredMenuItems = computed(() => {
-  return menuItems.filter(item => {
-    if (item.id === 'settings') {
-       return user?.role === 'admin'
-    }
-    return true
-  })
+  return menuItems
 })
 </script>
 

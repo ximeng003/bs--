@@ -14,9 +14,19 @@ const route = useRoute()
 const caseId = ref<string | null>(null)
 const caseName = ref('Web首页功能测试')
 const deviceType = ref('web')
+const existingDescription = ref<string | null>(null)
 const isExecuting = ref(false)
 const executionLogs = ref<string[]>([])
 const scriptContent = ref('')
+const pythonExample = `# 直接编写 Selenium Python 代码
+# 已注入: driver, By, WebDriverWait, EC, time, log
+# 无需自行创建或退出 driver
+
+driver.get("https://example.com")
+log("opened example.com")
+assert "Example" in driver.title
+`
+const placeholderText = computed(() => (deviceType.value === 'web' ? pythonExample : appScript))
 const appiumConf = ref({
     remoteUrl: 'http://127.0.0.1:4723',
     platformName: 'Android',
@@ -87,8 +97,6 @@ onMounted(async () => {
     if (id) {
         caseId.value = id
         await loadCase(id)
-    } else {
-        scriptContent.value = defaultScript
     }
 })
 
@@ -98,6 +106,7 @@ const loadCase = async (id: string) => {
         if (res) {
             caseName.value = res.name
             deviceType.value = res.type === 'APP' ? 'app' : 'web'
+            existingDescription.value = res.description || null
             const raw = res.content || ''
             const formatSelector = (s: any) => {
                 if (!s) {
@@ -162,9 +171,10 @@ const loadCase = async (id: string) => {
     }
 }
 
-watch(deviceType, (newValue) => {
-    if (!caseId.value) { // Only switch default script if creating new
-        scriptContent.value = newValue === 'web' ? defaultScript : appScript
+watch(deviceType, () => {
+    // 新建用例：不再预填脚本，交给 placeholder 展示示例
+    if (!caseId.value) {
+        scriptContent.value = ''
     }
 })
 
@@ -238,8 +248,10 @@ const parseScriptToSteps = (text: string) => {
 
 const handleSave = async () => {
     try {
+        const descRaw = existingDescription.value ? existingDescription.value.trim() : ''
+        const descClean = descRaw === 'Updated from Script Editor' ? '' : descRaw
         const contentObj = deviceType.value === 'web'
-            ? { script: scriptContent.value }
+            ? { language: 'python', script: scriptContent.value }
             : {
                 appium: {
                     remoteUrl: appiumConf.value.remoteUrl,
@@ -258,8 +270,7 @@ const handleSave = async () => {
             name: caseName.value,
             type: deviceType.value.toUpperCase(),
             content: JSON.stringify(contentObj),
-            // Add defaults if missing
-            description: 'Updated from Script Editor',
+            description: descClean,
             status: 'active'
         }
         
@@ -276,7 +287,7 @@ const handleSave = async () => {
             }
         }
         showToast('保存成功', 'success')
-    } catch (e) {
+    } catch (_e) {
         showToast('保存失败', 'error')
     }
 }
@@ -337,7 +348,38 @@ const appKeywords = [
   ]}
 ]
 
-const keywordGroups = computed(() => deviceType.value === 'app' ? appKeywords : webKeywords)
+// Python（Selenium）快捷片段
+const pythonKeywords = [
+  { category: '步骤/断言', items: [
+      { label: '步骤：描述', value: 'step("正在执行：描述这里")' },
+      { label: '断言相等', value: 'assert_equal("预期值", actual_value, "断言说明")' },
+      { label: '断言标题包含', value: 'assert_title_contains("关键字")' },
+      { label: '记录日志', value: 'log("记录一条说明")' },
+    ]},
+  { category: '导航操作', items: [
+      { label: '打开URL', value: 'driver.get("https://example.com")' },
+      { label: '刷新页面', value: 'driver.refresh()' },
+    ]},
+  { category: '元素操作', items: [
+      { label: '查找并点击', value: 'driver.find_element(By.CSS_SELECTOR, "#login-button").click()' },
+      { label: '输入文本', value: 'el = driver.find_element(By.NAME, "username")\nel.clear()\nel.send_keys("tester")' },
+      { label: '获取文本', value: 'text = driver.find_element(By.CSS_SELECTOR, ".title").text\nlog(text)' },
+    ]},
+  { category: '等待/断言', items: [
+      { label: '等待元素出现', value: 'WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, ".dashboard")))' },
+      { label: '断言标题包含', value: 'assert "Dashboard" in driver.title' },
+    ]},
+  { category: '其他操作', items: [
+      { label: '执行JS', value: 'driver.execute_script("window.scrollTo(0, document.body.scrollHeight)")' },
+      { label: '打印日志', value: 'log("step ok")' },
+    ]},
+]
+
+const keywordGroups = computed(() => {
+  if (deviceType.value === 'app') return appKeywords
+  if (deviceType.value === 'web') return pythonKeywords
+  return [] as any[]
+})
 
 const handleExecute = async () => {
   if (!caseId.value) {
@@ -372,7 +414,7 @@ const handleCopyCode = () => {
         <div class="flex items-center gap-4 flex-1">
           <div class="space-y-1 flex-1">
             <div class="text-xs text-gray-500">用例名称</div>
-            <Input v-model="caseName" />
+            <Input v-model="caseName" placeholder="输入用例名称（如：Web登录功能验证）" />
           </div>
           <div class="space-y-1 w-40">
             <div class="text-xs text-gray-500">设备类型</div>
@@ -465,7 +507,10 @@ const handleCopyCode = () => {
           <div class="flex-1 relative">
             <textarea
               v-model="scriptContent"
+              :placeholder="placeholderText"
               class="absolute inset-0 w-full h-full p-4 font-mono text-sm bg-gray-900 text-gray-100 resize-none focus:outline-none"
+              style="caret-color:#fff;"
+              placeholder-class="text-gray-500"
               spellcheck="false"
             ></textarea>
           </div>

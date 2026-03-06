@@ -54,15 +54,26 @@ const handleSubmit = async () => {
         username: username.value,
         password: password.value
       })
-      userStore.setUser(res)
+      const merged = res && res.user ? { ...res.user, token: res.token } : res
+      userStore.setUser(merged)
       router.push('/')
     }
   } catch (e: any) {
     const msg = e?.message || ''
-    if (msg.includes('Network Error') || msg.includes('ECONNREFUSED') || msg.includes('500')) {
-      error.value = '登录失败：后端服务可能未启动，请先运行后台服务。'
+    console.error('Login Error:', e)
+    
+    if (msg.includes('Network Error') || msg.includes('ECONNREFUSED')) {
+      error.value = `登录失败：无法连接到后端服务 (Network Error)。请确认后台服务已启动 (端口18080)。`
+    } else if (msg.includes('500')) {
+      error.value = `登录失败：后端服务内部错误 (500)。请检查后端日志。`
+    } else if (msg.includes('404')) {
+      error.value = `登录失败：请求地址不存在 (404)。请检查后端接口路径。`
     } else if (msg.includes('Invalid username or password')) {
       error.value = '登录失败：用户名或密码错误'
+    } else if (msg.includes('账户待审批')) {
+      error.value = '登录失败：账户待审批，请联系管理员通过审核'
+    } else if (msg.includes('账户已停用')) {
+      error.value = '登录失败：账户已停用，如需恢复请联系管理员'
     } else {
       error.value = (isRegister.value ? '注册失败: ' : '登录失败: ') + (msg || '未知错误')
     }

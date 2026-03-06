@@ -10,4 +10,6 @@ public class UpdateProfileDTO {
     private String avatar;
     private String notificationWebhook;
     private Boolean enableNotification;
+    private String notifyRule;
+    private Integer notifyThreshold;
 }

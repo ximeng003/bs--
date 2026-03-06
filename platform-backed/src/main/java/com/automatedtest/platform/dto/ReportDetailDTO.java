@@ -18,4 +18,7 @@ public class ReportDetailDTO {
     private LocalDateTime executedAt;
     private String executedBy;
     private String environment;
+    private Integer assertsTotal;
+    private Integer assertsPassed;
+    private Integer assertsFailed;
 }

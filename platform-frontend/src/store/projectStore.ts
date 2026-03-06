@@ -17,9 +17,6 @@ export const useProjectStore = defineStore('project', () => {
   const currentProject = ref<Project | null>(null)
   const projectList = ref<Project[]>([])
   
-  // Try to load from local storage
-  const storedProjectId = localStorage.getItem('currentProjectId')
-  
   const fetchProjects = async () => {
     try {
       const res: any = await request.get('/projects')
@@ -45,10 +42,13 @@ export const useProjectStore = defineStore('project', () => {
     }
   }
 
-  const setCurrentProject = (project: Project) => {
+  const setCurrentProject = (project: Project | null) => {
     currentProject.value = project
-    localStorage.setItem('currentProjectId', project.id.toString())
-    // Trigger reload to refresh all data with new project ID
+    if (project) {
+      localStorage.setItem('currentProjectId', project.id.toString())
+    } else {
+      localStorage.removeItem('currentProjectId')
+    }
     window.location.reload()
   }
 

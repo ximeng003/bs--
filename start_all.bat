@@ -12,7 +12,7 @@ echo.
 echo [Checking ports]
 
 REM Check port 8080
-netstat -ano | findstr ":8080" | findstr "LISTEN" > "%TEMP%\port_8080.txt"
+netstat -ano | findstr ":8080" | findstr "LISTENING" > "%TEMP%\port_8080.txt"
 for /f "tokens=5" %%a in ('type "%TEMP%\port_8080.txt"') do (
     if not "%%a"=="" (
         echo Killing process on port 8080 - PID: %%a
@@ -22,7 +22,7 @@ for /f "tokens=5" %%a in ('type "%TEMP%\port_8080.txt"') do (
 if exist "%TEMP%\port_8080.txt" del "%TEMP%\port_8080.txt"
 
 REM Check port 5173
-netstat -ano | findstr ":5173" | findstr "LISTEN" > "%TEMP%\port_5173.txt"
+netstat -ano | findstr ":5173" | findstr "LISTENING" > "%TEMP%\port_5173.txt"
 for /f "tokens=5" %%a in ('type "%TEMP%\port_5173.txt"') do (
     if not "%%a"=="" (
         echo Killing process on port 5173 - PID: %%a
@@ -30,6 +30,26 @@ for /f "tokens=5" %%a in ('type "%TEMP%\port_5173.txt"') do (
     )
 )
 if exist "%TEMP%\port_5173.txt" del "%TEMP%\port_5173.txt"
+
+REM Check port 18080
+netstat -ano | findstr ":18080" | findstr "LISTENING" > "%TEMP%\port_18080.txt"
+for /f "tokens=5" %%a in ('type "%TEMP%\port_18080.txt"') do (
+    if not "%%a"=="" (
+        echo Killing process on port 18080 - PID: %%a
+        taskkill /F /PID %%a >nul 2>nul
+    )
+)
+if exist "%TEMP%\port_18080.txt" del "%TEMP%\port_18080.txt"
+
+REM Check port 18081
+netstat -ano | findstr ":18081" | findstr "LISTENING" > "%TEMP%\port_18081.txt"
+for /f "tokens=5" %%a in ('type "%TEMP%\port_18081.txt"') do (
+    if not "%%a"=="" (
+        echo Killing process on port 18081 - PID: %%a
+        taskkill /F /PID %%a >nul 2>nul
+    )
+)
+if exist "%TEMP%\port_18081.txt" del "%TEMP%\port_18081.txt"
 
 REM ---------------------------------------------------
 REM Check for Maven
@@ -66,7 +86,30 @@ start "Platform Backend" cmd /k call "%MVN_CMD%" spring-boot:run
 echo.
 echo [2/2] Starting Frontend (Vue + Vite)...
 cd /d "%~dp0platform-frontend"
-start "Platform Frontend" cmd /k "npm run dev"
+set "BACKEND_PORT="
+for /L %%T in (1,1,60) do (
+  for /L %%P in (18080,1,18100) do (
+    netstat -ano | findstr ":%%P" | findstr "LISTENING" >nul 2>nul
+    if not errorlevel 1 (
+      set "BACKEND_PORT=%%P"
+      goto :FOUND_BACKEND_PORT
+    )
+  )
+  ping 127.0.0.1 -n 2 >nul
+)
+:FOUND_BACKEND_PORT
+if "%BACKEND_PORT%"=="" set "BACKEND_PORT=18080"
+echo Detected backend port: %BACKEND_PORT%
+echo.
+echo [Frontend Check] Running lint+typecheck+build (may skip lint if not installed)
+call npm run check
+if errorlevel 1 (
+  echo [ERROR] Frontend verification failed. Please fix issues and rerun.
+  pause
+  exit /b 1
+)
+set "VITE_API_TARGET=http://127.0.0.1:%BACKEND_PORT%"
+start "Platform Frontend" cmd /k "set VITE_API_TARGET=%VITE_API_TARGET% && npm run dev"
 
 echo.
 echo [Opening Microsoft Edge]

@@ -36,7 +36,7 @@ public class EnvironmentController {
         
         long count = teamMemberService.count(new QueryWrapper<TeamMember>()
                 .eq("team_id", project.getTeamId())
-                .eq("user_id", userId));
+                .eq("user_id", userId.intValue()));
         return count > 0;
     }
 
@@ -100,6 +100,24 @@ public class EnvironmentController {
         environment.setProjectId(existing.getProjectId());
         return Result.success(environmentService.updateById(environment));
     }
+
+    @GetMapping("/{id}/view")
+    @com.automatedtest.platform.annotation.OperationAudit(module = "Environment", operation = "View Secret")
+    public Result<Boolean> viewSecret(@PathVariable Integer id) {
+        Environment env = environmentService.getById(id);
+        if (env == null) {
+            return Result.error("环境配置不存在");
+        }
+        User user = UserContext.getCurrentUser();
+        if (user != null && !"admin".equalsIgnoreCase(user.getRole())) {
+            if (!hasProjectAccess(env.getProjectId(), user.getId())) {
+                return Result.error("您没有该项目的访问权限");
+            }
+        }
+        // 审计通过切面记录，此处返回成功即可
+        return Result.success(true);
+    }
+
 
     @DeleteMapping("/{id}")
     @OperationAudit(module = "Environment", operation = "Delete Environment")

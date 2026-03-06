@@ -25,4 +25,7 @@ public class Team implements Serializable {
 
     @TableField(value = "updated_at", fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updatedAt;
+
+    @TableField("is_deleted")
+    private Boolean isDeleted;
 }

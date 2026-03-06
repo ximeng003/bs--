@@ -99,8 +99,6 @@ router.beforeEach((to, from, next) => {
   
   if (to.meta.requiresAuth && !user) {
     next('/login')
-  } else if (to.name === 'Settings' && user && user.role !== 'admin') {
-    next('/') // Redirect non-admins away from settings
   } else {
     next()
   }

@@ -14,15 +14,51 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { User, LogOut, Shield, Lock, Database, Settings, Copy, Eye, EyeOff, Bell, Trash2, Plus } from 'lucide-vue-next'
+import { LogOut, Lock, Settings, Copy, Eye, EyeOff, Trash2, RefreshCw } from 'lucide-vue-next'
 import { userStore } from '@/store/userStore'
-import { useProjectStore } from '@/store/projectStore'
 import { showToast } from '@/lib/notify'
 import request from '@/api/request'
-import { Badge } from '@/components/ui/badge'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import { useProjectStore } from '@/store/projectStore'
 
 const router = useRouter()
 const projectStore = useProjectStore()
+
+const confirmDialog = ref({
+  open: false,
+  title: '',
+  description: '',
+  variant: 'default' as 'default' | 'destructive',
+  confirmAction: (() => {}) as () => void | Promise<void>
+})
+
+const NOTIFY_RULE_KEY = 'notify_rule'
+const NOTIFY_THRESHOLD_KEY = 'notify_threshold'
+const notifyRule = ref<string>(localStorage.getItem(NOTIFY_RULE_KEY) || 'on_fail')
+const notifyThreshold = ref<number>(Number(localStorage.getItem(NOTIFY_THRESHOLD_KEY) || '80'))
+const saveNotifyRule = (rule: string) => {
+  notifyRule.value = rule
+  localStorage.setItem(NOTIFY_RULE_KEY, rule)
+  profileForm.value.notifyRule = rule
+}
+const saveNotifyThreshold = () => {
+  localStorage.setItem(NOTIFY_THRESHOLD_KEY, String(notifyThreshold.value))
+  profileForm.value.notifyThreshold = notifyThreshold.value
+}
+const openConfirm = (title: string, description: string, action: () => void | Promise<void>, variant: 'default' | 'destructive' = 'default') => {
+  confirmDialog.value = {
+    open: true,
+    title,
+    description,
+    variant,
+    confirmAction: action
+  }
+}
+
+const handleConfirmAction = async () => {
+  await confirmDialog.value.confirmAction()
+  confirmDialog.value.open = false
+}
 
 // Avatar Logic
 const avatarStyles = [
@@ -53,7 +89,9 @@ const profileForm = ref({
   phone: '',
   avatar: '',
   notificationWebhook: '',
-  enableNotification: false
+  enableNotification: false,
+  notifyRule: notifyRule.value,
+  notifyThreshold: notifyThreshold.value
 })
 
 // Password Data
@@ -78,151 +116,26 @@ const currentVar = ref({
   description: ''
 })
 
-// Team Data
-const teams = ref<any[]>([])
-const showTeamDialog = ref(false)
-const teamForm = ref({
-  name: '',
-  description: ''
-})
-
-// Project Data
-const showProjectDialog = ref(false)
-const projectForm = ref({
-  name: '',
-  description: '',
-  teamId: null as number | null
-})
-
-const switchToProject = (project: any) => {
-  projectStore.setCurrentProject(project)
-  showToast(`已切换到项目: ${project.name}`, 'success')
-  window.location.reload()
-}
-
-const fetchTeams = async () => {
-  try {
-    const res: any = await request.get('/teams')
-    if (res) {
-      teams.value = res
-    }
-  } catch (e) {
-    console.error(e)
-  }
-}
-
-const handleCreateTeam = async () => {
-  if (!teamForm.value.name) return showToast('请输入团队名称', 'error')
-  try {
-    await request.post('/teams', teamForm.value)
-    showToast('团队创建成功', 'success')
-    showTeamDialog.value = false
-    teamForm.value = { name: '', description: '' }
-    fetchTeams()
-  } catch (e: any) {
-    showToast(e.message || '创建失败', 'error')
-  }
-}
-
-const handleCreateProject = async () => {
-  if (!projectForm.value.name) return showToast('请输入项目名称', 'error')
-  if (!projectForm.value.teamId) return showToast('请选择归属团队', 'error')
-  
-  try {
-    await request.post('/projects', projectForm.value)
-    showToast('项目创建成功', 'success')
-    showProjectDialog.value = false
-    projectForm.value = { name: '', description: '', teamId: null }
-    // Refresh project list
-    await projectStore.fetchProjects()
-  } catch (e: any) {
-    showToast(e.message || '创建失败', 'error')
-  }
-}
-
-// Team Management
-const showTeamManageDialog = ref(false)
-const currentTeam = ref<any>(null)
-const teamMembers = ref<any[]>([])
-const newMemberForm = ref({
-  username: '',
-  role: 'member'
-})
-
-const fetchTeamMembers = async (teamId: number) => {
-  try {
-    const res: any = await request.get(`/teams/${teamId}/members`)
-    if (res) {
-      teamMembers.value = res
-    }
-  } catch (e: any) {
-    showToast(e.message || '获取成员失败', 'error')
-  }
-}
-
-const openTeamSettings = async (team: any) => {
-  currentTeam.value = team
-  await fetchTeamMembers(team.id)
-  showTeamManageDialog.value = true
-}
-
-const handleAddMember = async () => {
-  if (!newMemberForm.value.username) return showToast('请输入用户名', 'error')
-  try {
-    await request.post(`/teams/${currentTeam.value.id}/members`, newMemberForm.value)
-    showToast('成员添加成功', 'success')
-    newMemberForm.value.username = ''
-    fetchTeamMembers(currentTeam.value.id)
-  } catch (e: any) {
-    showToast(e.message || '添加失败', 'error')
-  }
-}
-
-const handleRemoveMember = async (userId: number) => {
-  if (!confirm('确定要移除该成员吗？')) return
-  try {
-    await request.delete(`/teams/${currentTeam.value.id}/members/${userId}`)
-    showToast('成员已移除', 'success')
-    fetchTeamMembers(currentTeam.value.id)
-  } catch (e: any) {
-    showToast(e.message || '移除失败', 'error')
-  }
-}
-
-const showRoleConfirmDialog = ref(false)
-const roleConfirmData = ref<{ member: any, newRole: string } | null>(null)
-
-const handleUpdateMemberRole = (member: any, newRole: string) => {
-  roleConfirmData.value = { member, newRole }
-  showRoleConfirmDialog.value = true
-}
-
-const confirmUpdateRole = async () => {
-  if (!roleConfirmData.value) return
-  const { member, newRole } = roleConfirmData.value
-  
-  try {
-    await request.put(`/teams/${currentTeam.value.id}/members/${member.id}`, { role: newRole })
-    showToast('角色更新成功', 'success')
-    fetchTeamMembers(currentTeam.value.id)
-    showRoleConfirmDialog.value = false
-  } catch (e: any) {
-    showToast(e.message || '更新失败', 'error')
-  }
-}
-
 // Fetch Profile
 const fetchProfile = async () => {
   try {
     const res: any = await request.get('/user/profile')
     if (res) {
+      const serverRule = res.notificationRule || notifyRule.value
+      const serverThreshold = typeof res.notificationThreshold === 'number' ? res.notificationThreshold : notifyThreshold.value
+      notifyRule.value = serverRule
+      notifyThreshold.value = serverThreshold
+      localStorage.setItem(NOTIFY_RULE_KEY, serverRule)
+      localStorage.setItem(NOTIFY_THRESHOLD_KEY, String(serverThreshold))
       profileForm.value = {
         nickname: res.nickname || '',
         email: res.email || '',
         phone: res.phone || '',
         avatar: res.avatar || '',
         notificationWebhook: res.notificationWebhook || '',
-        enableNotification: res.enableNotification || false
+        enableNotification: res.enableNotification || false,
+        notifyRule: serverRule,
+        notifyThreshold: serverThreshold
       }
     }
   } catch (e) {
@@ -328,15 +241,16 @@ const saveVariable = async () => {
   resetVarForm()
 }
 
-const deleteVariable = async (id: number) => {
-  if (!confirm('确定要删除该变量吗？')) return
-  try {
-    await request.delete(`/user/variables/${id}`)
-    showToast('删除成功', 'success')
-    fetchVariables()
-  } catch (e: any) {
-    showToast(e.message || '删除失败', 'error')
-  }
+const deleteVariable = (id: number) => {
+  openConfirm('删除变量', '确定要删除该变量吗？', async () => {
+    try {
+      await request.delete(`/user/variables/${id}`)
+      showToast('删除成功', 'success')
+      fetchVariables()
+    } catch (e: any) {
+      showToast(e.message || '删除失败', 'error')
+    }
+  }, 'destructive')
 }
 
 const editVariable = (item: any) => {
@@ -351,10 +265,6 @@ const resetVarForm = () => {
 const handleLogout = () => {
   userStore.clearUser()
   router.push('/login')
-}
-
-const goToAdmin = () => {
-  router.push('/settings')
 }
 
 // API Keys
@@ -384,7 +294,7 @@ const loadApiKeys = async () => {
 
 const generateApiKey = async () => {
   try {
-    const res: any = await request.post('/user/api-keys', { name: `Personal Key ${apiKeys.value.length + 1}` })
+    await request.post('/user/api-keys', { name: `Personal Key ${apiKeys.value.length + 1}` })
     showToast('API Key 生成成功', 'success')
     loadApiKeys()
   } catch (e: any) {
@@ -392,45 +302,16 @@ const generateApiKey = async () => {
   }
 }
 
-const revokeApiKey = async (id: string) => {
-  if (!confirm('确定要撤销此密钥吗？撤销后将无法恢复。')) return
-  try {
-    await request.delete(`/user/api-keys/${id}`)
-    showToast('API Key 已撤销', 'success')
-    loadApiKeys()
-  } catch (e: any) {
-    showToast(e.message || '撤销失败', 'error')
-  }
-}
-
-const saveApiKeys = () => {
-  // Deprecated: using backend
-}
-
-const handleDeleteTeam = async (id: number) => {
-  if (!confirm('确定要删除该团队吗？这将同时删除所有团队成员，但必须先删除团队下的项目。')) return
-  try {
-    await request.delete(`/teams/${id}`)
-    showToast('团队删除成功', 'success')
-    fetchTeams()
-  } catch (e: any) {
-    showToast(e.message || '删除失败', 'error')
-  }
-}
-
-const handleDeleteProject = async (id: number) => {
-  if (!confirm('确定要删除该项目吗？此操作不可恢复。')) return
-  try {
-    await request.delete(`/projects/${id}`)
-    showToast('项目删除成功', 'success')
-    projectStore.fetchProjects()
-    if (projectStore.currentProject?.id === id) {
-      projectStore.setCurrentProject(null)
-      window.location.reload()
+const revokeApiKey = (id: string) => {
+  openConfirm('撤销密钥', '确定要撤销此密钥吗？撤销后将无法恢复。', async () => {
+    try {
+      await request.delete(`/user/api-keys/${id}`)
+      showToast('API Key 已撤销', 'success')
+      loadApiKeys()
+    } catch (e: any) {
+      showToast(e.message || '撤销失败', 'error')
     }
-  } catch (e: any) {
-    showToast(e.message || '删除失败', 'error')
-  }
+  }, 'destructive')
 }
 
 const copyToClipboard = (text: string) => {
@@ -441,20 +322,46 @@ const copyToClipboard = (text: string) => {
   })
 }
 
-const getTeamName = (teamId: number) => {
-  if (!teamId) return '-'
-  const team = teams.value.find(t => t.id === teamId)
-  return team ? team.name : '-'
-}
-
 onMounted(() => {
   fetchProfile()
   fetchLogs()
   fetchVariables()
   loadApiKeys()
-  fetchTeams()
-  projectStore.fetchProjects()
 })
+
+// Permission Requests
+const applyForm = ref({
+  requestType: 'JOIN_PROJECT' as 'JOIN_PROJECT' | 'UPGRADE_ROLE',
+  projectId: null as number | null,
+  description: ''
+})
+const submitting = ref(false)
+const submitPermissionRequest = async () => {
+  if (applyForm.value.requestType === 'JOIN_PROJECT') {
+    if (!applyForm.value.projectId) {
+      const pid = projectStore.currentProject?.id
+      if (!pid) {
+        showToast('请选择项目或先在左侧选择当前项目', 'error')
+        return
+      }
+      applyForm.value.projectId = pid
+    }
+  }
+  try {
+    submitting.value = true
+    await request.post('/permission-requests', {
+      requestType: applyForm.value.requestType,
+      projectId: applyForm.value.projectId,
+      description: applyForm.value.description
+    })
+    showToast('申请已提交，等待管理员审批', 'success')
+    applyForm.value = { requestType: 'JOIN_PROJECT', projectId: null, description: '' }
+  } catch (e: any) {
+    showToast(e.message || '提交失败', 'error')
+  } finally {
+    submitting.value = false
+  }
+}
 </script>
 
 <template>
@@ -480,12 +387,11 @@ onMounted(() => {
     </Card>
 
     <Tabs default-value="profile" class="space-y-4">
-      <TabsList class="grid w-full grid-cols-5">
+      <TabsList class="grid w-full grid-cols-4">
         <TabsTrigger value="profile">个人资料</TabsTrigger>
         <TabsTrigger value="security">账户安全</TabsTrigger>
         <TabsTrigger value="assets">我的资产</TabsTrigger>
         <TabsTrigger value="notification">消息通知</TabsTrigger>
-        <TabsTrigger value="projects">我的项目</TabsTrigger>
       </TabsList>
       
       <!-- Profile Tab -->
@@ -513,7 +419,7 @@ onMounted(() => {
                        :key="style.value"
                        variant="outline" 
                        size="sm"
-                       :class="{'bg-primary text-primary-foreground hover:bg-primary/90': currentAvatarStyle === style.value}"
+                       :class="currentAvatarStyle === style.value ? 'bg-primary text-primary-foreground hover:bg-primary/90' : ''"
                        @click="changeAvatarStyle(style.value)"
                      >
                        {{ style.label }}
@@ -552,6 +458,40 @@ onMounted(() => {
             
             <div class="flex justify-end">
               <Button @click="handleUpdateProfile">保存更改</Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card class="mt-6">
+          <CardHeader>
+            <CardTitle>申请权限</CardTitle>
+            <CardDescription>当需要加入项目或升级为管理员时，提交申请由管理员审批</CardDescription>
+          </CardHeader>
+          <CardContent class="space-y-4">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div class="space-y-2">
+                <Label>申请类型</Label>
+                <select v-model="applyForm.requestType" class="h-9 px-3 rounded-md border border-input bg-background text-sm">
+                  <option value="JOIN_PROJECT">加入当前项目</option>
+                  <option value="UPGRADE_ROLE">申请管理员</option>
+                </select>
+              </div>
+              <div class="space-y-2" v-if="applyForm.requestType === 'JOIN_PROJECT'">
+                <Label>项目</Label>
+                <select v-model="applyForm.projectId" class="h-9 px-3 rounded-md border border-input bg-background text-sm">
+                  <option :value="null">使用左侧当前项目</option>
+                  <option v-for="p in projectStore.projectList" :key="p.id" :value="p.id">#{{ p.id }} - {{ p.name }}</option>
+                </select>
+              </div>
+            </div>
+            <div class="space-y-2">
+              <Label>说明（可选）</Label>
+              <Input v-model="applyForm.description" placeholder="说明申请原因或用途" />
+            </div>
+            <div class="flex justify-end">
+              <Button :disabled="submitting" @click="submitPermissionRequest">
+                提交申请
+              </Button>
             </div>
           </CardContent>
         </Card>
@@ -774,6 +714,29 @@ onMounted(() => {
             
             <div v-if="profileForm.enableNotification" class="space-y-4 animate-in fade-in slide-in-from-top-2">
               <div class="space-y-2">
+                <Label>通知事件触发配置</Label>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <label class="flex items-center gap-2 text-sm">
+                    <input type="radio" name="notifyRule" value="on_fail" @change="saveNotifyRule('on_fail')" :checked="notifyRule === 'on_fail'" />
+                    仅在任务失败时通知
+                  </label>
+                  <label class="flex items-center gap-2 text-sm">
+                    <input type="radio" name="notifyRule" value="low_pass_rate" @change="saveNotifyRule('low_pass_rate')" :checked="notifyRule === 'low_pass_rate'" />
+                    通过率低于阈值时通知
+                  </label>
+                  <label class="flex items-center gap-2 text-sm">
+                    <input type="radio" name="notifyRule" value="all" @change="saveNotifyRule('all')" :checked="notifyRule === 'all'" />
+                    所有任务通知
+                  </label>
+                </div>
+                <div v-if="notifyRule === 'low_pass_rate'" class="flex items-center gap-2 mt-2">
+                  <Label>阈值</Label>
+                  <input type="number" min="0" max="100" step="1" v-model="notifyThreshold" @change="saveNotifyThreshold" class="h-9 px-3 rounded-md border border-input bg-background text-sm w-24" />
+                  <span class="text-sm text-gray-500">%（例如 80）</span>
+                </div>
+                <p class="text-xs text-gray-400">提示：通知规则仅用于减少消息噪音，后续将配合后端执行引擎触发。</p>
+              </div>
+              <div class="space-y-2">
                 <Label>Webhook 地址 (钉钉/飞书/企业微信)</Label>
                 <Input 
                   v-model="profileForm.notificationWebhook" 
@@ -789,281 +752,14 @@ onMounted(() => {
           </CardContent>
         </Card>
       </TabsContent>
-
-      <!-- My Projects Tab -->
-      <TabsContent value="projects">
-        <div class="space-y-6">
-          <Card>
-            <CardHeader class="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle>我的团队</CardTitle>
-                <CardDescription>您所属的团队列表</CardDescription>
-              </div>
-              <Button @click="showTeamDialog = true">
-                <Plus class="w-4 h-4 mr-2" /> 创建团队
-              </Button>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>团队名称</TableHead>
-                    <TableHead>描述</TableHead>
-                    <TableHead>创建时间</TableHead>
-                    <TableHead class="text-right">操作</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  <TableRow v-for="team in teams" :key="team.id">
-                    <TableCell class="font-medium">{{ team.name }}</TableCell>
-                    <TableCell>{{ team.description || '-' }}</TableCell>
-                    <TableCell>{{ new Date(team.createdAt).toLocaleDateString() }}</TableCell>
-                    <TableCell class="text-right">
-                      <Button variant="ghost" size="sm" @click="openTeamSettings(team)">管理</Button>
-                      <Button variant="ghost" size="sm" class="text-red-600 ml-2" @click="handleDeleteTeam(team.id)">删除</Button>
-                    </TableCell>
-                  </TableRow>
-                  <TableRow v-if="teams.length === 0">
-                    <TableCell colspan="4" class="text-center text-gray-500 py-8">暂无团队</TableCell>
-                  </TableRow>
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader class="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle>我的项目</CardTitle>
-                <CardDescription>您参与的所有项目列表</CardDescription>
-              </div>
-              <Button @click="showProjectDialog = true">
-                <Plus class="w-4 h-4 mr-2" /> 创建项目
-              </Button>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>项目名称</TableHead>
-                    <TableHead>描述</TableHead>
-                    <TableHead>角色</TableHead>
-                    <TableHead>归属团队</TableHead>
-                    <TableHead class="text-right">操作</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  <TableRow v-for="project in projectStore.projectList" :key="project.id">
-                    <TableCell class="font-medium">
-                      <div class="flex items-center gap-2">
-                        <div class="w-2 h-2 rounded-full bg-primary" v-if="projectStore.currentProject?.id === project.id"></div>
-                        {{ project.name }}
-                      </div>
-                    </TableCell>
-                    <TableCell>{{ project.description || '-' }}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline">{{ project.role || 'Member' }}</Badge>
-                    </TableCell>
-                    <TableCell>{{ getTeamName(project.teamId) }}</TableCell>
-                    <TableCell class="text-right">
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        :disabled="projectStore.currentProject?.id === project.id"
-                        @click="switchToProject(project)"
-                      >
-                        切换
-                      </Button>
-                      <Button 
-                        variant="ghost" 
-                        size="sm"
-                        class="text-red-600 ml-2" 
-                        @click="handleDeleteProject(project.id)"
-                      >
-                        删除
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                  <TableRow v-if="projectStore.projectList.length === 0">
-                    <TableCell colspan="4" class="text-center text-gray-500 py-8">暂无项目</TableCell>
-                  </TableRow>
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        </div>
-      </TabsContent>
-
-    <!-- Create Team Dialog -->
-    <div v-if="showTeamDialog" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div class="bg-white rounded-lg p-6 w-full max-w-md shadow-xl">
-        <h3 class="text-lg font-semibold mb-4">创建新团队</h3>
-        <div class="space-y-4">
-          <div class="space-y-2">
-            <Label>团队名称</Label>
-            <Input v-model="teamForm.name" placeholder="输入团队名称" />
-          </div>
-          <div class="space-y-2">
-            <Label>描述</Label>
-            <Input v-model="teamForm.description" placeholder="可选描述" />
-          </div>
-        </div>
-        <div class="flex justify-end gap-2 mt-6">
-          <Button variant="outline" @click="showTeamDialog = false">取消</Button>
-          <Button @click="handleCreateTeam">创建</Button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Create Project Dialog -->
-    <div v-if="showProjectDialog" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div class="bg-white rounded-lg p-6 w-full max-w-md shadow-xl">
-        <h3 class="text-lg font-semibold mb-4">创建新项目</h3>
-        <div class="space-y-4">
-          <div class="space-y-2">
-            <Label>项目名称</Label>
-            <Input v-model="projectForm.name" placeholder="输入项目名称" />
-          </div>
-          <div class="space-y-2">
-            <Label>描述</Label>
-            <Input v-model="projectForm.description" placeholder="可选描述" />
-          </div>
-          <div class="space-y-2">
-            <Label>归属团队</Label>
-            <select v-model="projectForm.teamId" class="w-full bg-white border border-gray-300 rounded px-3 py-2 text-sm">
-              <option :value="null" disabled>请选择团队</option>
-              <option v-for="team in teams" :key="team.id" :value="team.id">{{ team.name }}</option>
-            </select>
-          </div>
-        </div>
-        <div class="flex justify-end gap-2 mt-6">
-          <Button variant="outline" @click="showProjectDialog = false">取消</Button>
-          <Button @click="handleCreateProject">创建</Button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Team Management Dialog -->
-    <div v-if="showTeamManageDialog" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div class="bg-white rounded-lg p-6 w-full max-w-2xl shadow-xl max-h-[90vh] overflow-y-auto">
-        <div class="flex justify-between items-center mb-6">
-          <div>
-            <h3 class="text-lg font-semibold">{{ currentTeam?.name }} - 成员管理</h3>
-            <p class="text-sm text-gray-500">{{ currentTeam?.description }}</p>
-          </div>
-          <Button variant="ghost" size="icon" @click="showTeamManageDialog = false">
-            <span class="text-2xl">&times;</span>
-          </Button>
-        </div>
-        
-        <div class="space-y-6">
-          <!-- Add Member -->
-          <div class="flex gap-4 items-end bg-gray-50 p-4 rounded-lg">
-            <div class="flex-1 space-y-2">
-              <Label>用户名</Label>
-              <Input v-model="newMemberForm.username" placeholder="输入用户名邀请加入" />
-            </div>
-            <div class="w-32 space-y-2">
-              <Label>角色</Label>
-              <select v-model="newMemberForm.role" class="w-full h-10 px-3 rounded-md border border-input bg-background text-sm">
-                <option value="member">成员</option>
-                <option value="admin">管理员</option>
-              </select>
-            </div>
-            <Button @click="handleAddMember">添加</Button>
-          </div>
-
-          <!-- Member List -->
-          <div>
-            <h4 class="font-medium mb-4">成员列表 ({{ teamMembers.length }})</h4>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>用户</TableHead>
-                  <TableHead>角色</TableHead>
-                  <TableHead>加入时间</TableHead>
-                  <TableHead class="text-right">操作</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                <TableRow v-for="member in teamMembers" :key="member.id">
-                  <TableCell>
-                    <div class="flex items-center gap-2">
-                      <div class="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center overflow-hidden">
-                        <img v-if="member.avatar" :src="member.avatar" class="w-full h-full object-cover" />
-                        <span v-else class="text-xs">{{ member.username?.substring(0, 2).toUpperCase() }}</span>
-                      </div>
-                      <div>
-                        <div class="font-medium">{{ member.nickname || member.username }}</div>
-                        <div class="text-xs text-gray-500">@{{ member.username }}</div>
-                      </div>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge :variant="member.role === 'admin' ? 'default' : 'secondary'">
-                      {{ member.role === 'admin' ? '管理员' : '成员' }}
-                    </Badge>
-                  </TableCell>
-                  <TableCell class="text-gray-500 text-sm">
-                    {{ new Date(member.joinedAt).toLocaleDateString() }}
-                  </TableCell>
-                  <TableCell class="text-right">
-                    <div class="flex justify-end gap-2" v-if="member.userId !== userStore.user?.id">
-                       <Button 
-                        variant="ghost" 
-                        size="sm"
-                        v-if="member.role === 'member'"
-                        @click="handleUpdateMemberRole(member, 'admin')"
-                      >
-                        设为管理
-                      </Button>
-                      <Button 
-                        variant="ghost" 
-                        size="sm"
-                        v-if="member.role === 'admin'"
-                        @click="handleUpdateMemberRole(member, 'member')"
-                      >
-                        降为成员
-                      </Button>
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        class="text-red-600 hover:text-red-700 hover:bg-red-50"
-                        @click="handleRemoveMember(member.id)"
-                      >
-                        移除
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
-          </div>
-        </div>
-      </div>
-    </div>
-
-
-    <!-- Role Change Confirmation Dialog -->
-    <div v-if="showRoleConfirmDialog" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
-      <div class="bg-white rounded-lg p-6 w-full max-w-sm shadow-xl">
-        <h3 class="text-lg font-semibold mb-2">确认角色变更</h3>
-        <p class="text-gray-600 mb-6">
-          确定要将用户 
-          <span class="font-bold text-gray-900">{{ roleConfirmData?.member?.username }}</span> 
-          的角色设置为 
-          <span class="font-bold text-blue-600">{{ roleConfirmData?.newRole === 'admin' ? '管理员' : '普通成员' }}</span> 
-          吗？
-        </p>
-        <div class="flex justify-end gap-2">
-          <Button variant="outline" @click="showRoleConfirmDialog = false">取消</Button>
-          <Button @click="confirmUpdateRole" :variant="roleConfirmData?.newRole === 'admin' ? 'default' : 'secondary'">
-            确认变更
-          </Button>
-        </div>
-      </div>
-    </div>
-
     </Tabs>
+    <ConfirmDialog 
+      :open="confirmDialog.open"
+      :title="confirmDialog.title"
+      :description="confirmDialog.description"
+      :variant="confirmDialog.variant"
+      @update:open="(val) => confirmDialog.open = val"
+      @confirm="handleConfirmAction"
+    />
   </div>
 </template>

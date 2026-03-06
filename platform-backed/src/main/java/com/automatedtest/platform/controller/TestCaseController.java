@@ -46,7 +46,7 @@ public class TestCaseController {
         
         long count = teamMemberService.count(new QueryWrapper<TeamMember>()
                 .eq("team_id", project.getTeamId())
-                .eq("user_id", userId));
+                .eq("user_id", userId.intValue()));
         return count > 0;
     }
 

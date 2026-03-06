@@ -30,4 +30,13 @@ public class Project implements Serializable {
     private LocalDateTime updatedAt;
     @TableField(exist = false)
     private String role;
+
+    @TableField("status")
+    private String status;
+
+    @TableField("is_deleted")
+    private Boolean isDeleted;
+
+    @TableField("health_score")
+    private Double healthScore;
 }

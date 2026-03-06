@@ -200,7 +200,48 @@ public class DashboardServiceImpl implements DashboardService {
         }
         stats.setDailyTrend(dailyTrend);
         
-        // 3. Recent Activity (Modified to use MP query instead of custom SQL for robustness)
+        // Compute passRate
+        long totalForRate = stats.getPassedCases() + stats.getFailedCases();
+        double passRate = totalForRate > 0 ? Math.round((stats.getPassedCases() * 10000.0) / totalForRate) / 100.0 : 0.0;
+        stats.setPassRate(passRate);
+        
+        // Coverage: unique executed cases in last 7 days / total cases
+        QueryWrapper<TestReport> coverageWrapper = new QueryWrapper<>();
+        coverageWrapper.ge("executed_at", startDate);
+        if (finalProjectId != null) coverageWrapper.eq("project_id", finalProjectId);
+        List<TestReport> covReports = testReportMapper.selectList(coverageWrapper);
+        Set<Integer> executedCaseIds = new HashSet<>();
+        if (covReports != null) {
+            for (TestReport r : covReports) {
+                if (r.getCaseId() != null) executedCaseIds.add(r.getCaseId());
+            }
+        }
+        double coverage = stats.getTotalCases() > 0 ? Math.round((executedCaseIds.size() * 10000.0) / stats.getTotalCases()) / 100.0 : 0.0;
+        stats.setCoverage(coverage);
+        
+        // Stability: 1 - stddev/mean of execution time (last 7 days), clamp to [0,1], then scale 0-100
+        List<Integer> durations = new ArrayList<>();
+        if (covReports != null) {
+            for (TestReport r : covReports) {
+                if (r.getExecutionTime() != null && r.getExecutionTime() > 0) durations.add(r.getExecutionTime());
+            }
+        }
+        double stability = 0.0;
+        if (!durations.isEmpty()) {
+            double mean = durations.stream().mapToDouble(d -> d).average().orElse(0.0);
+            double variance = durations.stream().mapToDouble(d -> (d - mean) * (d - mean)).sum() / durations.size();
+            double stddev = Math.sqrt(variance);
+            double ratio = mean > 0 ? (stddev / mean) : 1.0;
+            double s = 1.0 - Math.min(Math.max(ratio, 0.0), 1.0);
+            stability = Math.round(s * 10000.0) / 100.0;
+        }
+        stats.setStability(stability);
+        
+        // Health Score: 0.6*passRate + 0.2*coverage + 0.2*stability
+        double healthScore = Math.round((passRate * 0.6 + coverage * 0.2 + stability * 0.2) * 100.0) / 100.0;
+        stats.setHealthScore(healthScore);
+        
+        // 3. Recent Activity
         QueryWrapper<TestReport> recentWrapper = new QueryWrapper<>();
         recentWrapper.eq("project_id", finalProjectId);
         recentWrapper.orderByDesc("executed_at");

@@ -17,11 +17,15 @@ const route = useRoute()
 const router = useRouter()
 const caseId = ref<string | null>(null)
 const name = ref('New API Case')
+const environment = ref('dev')
+const envOptions = ref<{ id?: number; name: string; keyName: string }[]>([])
+const existingDescription = ref<string | null>(null)
+const PLACEHOLDER_DESC = 'Updated from API Editor'
 
 const method = ref('GET')
-const url = ref('https://api.example.com')
+const url = ref('')
 const bodyType = ref<'json' | 'form' | 'raw'>('json')
-const bodyContent = ref('{}')
+const bodyContent = ref('')
 
 const responseData = ref<any>(null)
 const statusCode = ref<number | null>(null)
@@ -38,7 +42,7 @@ const ignoreCommonHeaders = ref(true)
 const tokenizeCurl = (input: string): string[] => {
   const tokens: string[] = []
   let current = ''
-  let quote: '"' | "'" | null = null
+  let quote: '"' | "'" | '`' | null = null
   for (let i = 0; i < input.length; i++) {
     const ch = input[i]
     if (quote) {
@@ -47,8 +51,8 @@ const tokenizeCurl = (input: string): string[] => {
       } else {
         current += ch
       }
-    } else if (ch === '"' || ch === "'") {
-      quote = ch as '"' | "'"
+    } else if (ch === '"' || ch === "'" || ch === '`') {
+      quote = ch as '"' | "'" | '`'
     } else if (/\s/.test(ch)) {
       if (current) {
         tokens.push(current)
@@ -76,6 +80,17 @@ const parseCurl = (
   const parsedParams: { key: string; value: string; active: boolean }[] = []
   let parsedBody = ''
 
+  const cleanToken = (val: string) => {
+    let t = val.trim()
+    t = t.replace(/^["'`]+/, '')
+    t = t.replace(/["'`,，。]+$/, '')
+    return t
+  }
+  const isVariableUrl = (val: string) => {
+    const v = val.trim()
+    return /^\{\{.+\}\}/.test(v) || /^\$\(.+\)/.test(v)
+  }
+
   const commonHeaders = new Set([
     'accept',
     'accept-encoding',
@@ -100,12 +115,12 @@ const parseCurl = (
     if (lower === 'curl') continue
 
     if ((lower === '-x' || lower === '--request') && i + 1 < tokens.length) {
-      parsedMethod = tokens[++i].toUpperCase()
+      parsedMethod = cleanToken(tokens[++i]).toUpperCase()
       continue
     }
 
     if ((lower === '-h' || lower === '--header') && i + 1 < tokens.length) {
-      const headerStr = tokens[++i]
+      const headerStr = cleanToken(tokens[++i])
       const idx = headerStr.indexOf(':')
       if (idx > 0) {
         const key = headerStr.slice(0, idx).trim()
@@ -118,7 +133,7 @@ const parseCurl = (
     }
 
     if (lower === '--url' && i + 1 < tokens.length) {
-      parsedUrl = tokens[++i]
+      parsedUrl = cleanToken(tokens[++i])
       continue
     }
 
@@ -130,13 +145,13 @@ const parseCurl = (
       lower === '-d'
     ) {
       if (i + 1 < tokens.length) {
-        parsedBody = tokens[++i]
+        parsedBody = cleanToken(tokens[++i])
       }
       continue
     }
 
-    if (!parsedUrl && /^https?:\/\//i.test(token)) {
-      parsedUrl = token
+    if (!parsedUrl && (/^https?:\/\//i.test(token) || isVariableUrl(token))) {
+      parsedUrl = cleanToken(token)
     }
   }
 
@@ -183,6 +198,13 @@ onMounted(async () => {
     caseId.value = id
     await loadCase(id)
   }
+  try {
+    const res: any = await request.get('/environments')
+    const arr = Array.isArray(res) ? res : []
+    envOptions.value = arr.map((e: any) => ({ id: e.id, name: e.name, keyName: e.keyName }))
+  } catch {
+    envOptions.value = []
+  }
 })
 
 const loadCase = async (id: string) => {
@@ -190,12 +212,14 @@ const loadCase = async (id: string) => {
     const res: any = await request.get(`/testcases/${id}`)
     if (res) {
       name.value = res.name
+      environment.value = res.environment || 'dev'
+      existingDescription.value = res.description || null
       try {
         const content = JSON.parse(res.content || '{}')
         method.value = content.method || 'GET'
         url.value = content.url || ''
         bodyType.value = content.bodyType || 'json'
-        bodyContent.value = content.body || '{}'
+        bodyContent.value = content.body || ''
         headers.value = content.headers || []
         params.value = content.params || []
         assertions.value = content.assertions || []
@@ -219,14 +243,16 @@ const handleSave = async () => {
     assertions: assertions.value
   })
 
+  const descRaw = existingDescription.value ? existingDescription.value.trim() : ''
+  const descClean = descRaw === PLACEHOLDER_DESC ? '' : descRaw
   const payload = {
     id: caseId.value,
     name: name.value,
     type: 'API',
     content,
-    description: 'Updated from API Editor',
+    description: descClean,
     status: 'active',
-    environment: 'dev'
+    environment: environment.value
   }
 
   try {
@@ -240,7 +266,7 @@ const handleSave = async () => {
     }
     showToast('保存成功', 'success')
     router.push('/api-cases')
-  } catch (e) {
+  } catch (_e) {
     showToast('保存失败', 'error')
   }
 }
@@ -285,7 +311,7 @@ const handleSend = async () => {
                 return new Date().toISOString().split('T')[0];
             case 'datetime':
                  return new Date().toISOString();
-            case 'string':
+            case 'string': {
                 const len = parseInt(args[0]) || 8;
                 const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
                 let str = '';
@@ -293,10 +319,13 @@ const handleSend = async () => {
                     str += chars.charAt(Math.floor(Math.random() * chars.length));
                 }
                 return str;
+            }
             case 'number':
+            {
                 const min = parseInt(args[0]) || 0;
                 const max = parseInt(args[1]) || 100;
                 return Math.floor(Math.random() * (max - min + 1) + min).toString();
+            }
             case 'phone':
                 return '1' + Math.floor(Math.random() * 9 + 1) + Math.floor(Math.random() * 1000000000).toString().padStart(9, '0');
             case 'email':
@@ -421,7 +450,18 @@ const removeAssertion = (index: number) => assertions.value.splice(index, 1)
     </Dialog>
 
     <div class="flex items-center gap-4 mb-4">
-      <Input v-model="name" placeholder="Case Name" class="w-64" />
+          <Input v-model="name" placeholder="输入用例名称" class="w-64" />
+      <Select v-model="environment">
+        <SelectTrigger class="w-56">
+          <SelectValue placeholder="选择环境" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem v-for="e in envOptions" :key="e.keyName" :value="e.keyName">
+            {{ e.name }}（{{ e.keyName }}）
+          </SelectItem>
+          <SelectItem v-if="envOptions.length === 0" value="dev">开发环境（dev）</SelectItem>
+        </SelectContent>
+      </Select>
     </div>
 
     <Card class="border-gray-200">
@@ -441,7 +481,7 @@ const removeAssertion = (index: number) => assertions.value.splice(index, 1)
           </Select>
           <Input
             v-model="url"
-            placeholder="输入请求URL"
+            placeholder="例如 https://api.example.com/users?limit=10"
             class="flex-1 border-gray-300"
           />
           <Button
@@ -486,7 +526,7 @@ const removeAssertion = (index: number) => assertions.value.splice(index, 1)
                   <input type="checkbox" v-model="item.active" class="rounded" />
                 </div>
                 <div class="col-span-5">
-                  <Input v-model="item.key" placeholder="参数名" class="border-gray-300" />
+                  <Input v-model="item.key" placeholder="参数名（如 page 或 id）" class="border-gray-300" />
                 </div>
                 <div class="col-span-5">
                   <Input v-model="item.value" placeholder="参数值" class="border-gray-300" />
@@ -514,10 +554,10 @@ const removeAssertion = (index: number) => assertions.value.splice(index, 1)
                   <input type="checkbox" v-model="item.active" class="rounded" />
                 </div>
                 <div class="col-span-5">
-                  <Input v-model="item.key" placeholder="Header Key" class="border-gray-300" />
+                  <Input v-model="item.key" placeholder="Header Key（如 Content-Type）" class="border-gray-300" />
                 </div>
                 <div class="col-span-5">
-                  <Input v-model="item.value" placeholder="Header Value" class="border-gray-300" />
+                  <Input v-model="item.value" placeholder="Header Value（如 application/json）" class="border-gray-300" />
                 </div>
                 <div class="col-span-1">
                   <Button variant="ghost" size="sm" class="text-gray-400 hover:text-red-600" @click="removeHeader(index)">
@@ -543,6 +583,7 @@ const removeAssertion = (index: number) => assertions.value.splice(index, 1)
               </Select>
               <Textarea
                 v-model="bodyContent"
+                placeholder='例如：{"name":"demo","id":123}'
                 class="font-mono text-sm min-h-[300px] bg-gray-900 text-green-400 border-gray-700"
               />
             </div>
@@ -574,10 +615,10 @@ const removeAssertion = (index: number) => assertions.value.splice(index, 1)
                   </Select>
                 </div>
                 <div class="col-span-4">
-                  <Input v-model="item.path" placeholder="Path" class="border-gray-300" />
+                  <Input v-model="item.path" placeholder="JSONPath（如 $.id）" class="border-gray-300" />
                 </div>
                 <div class="col-span-3">
-                  <Input v-model="item.value" placeholder="Value" class="border-gray-300" />
+                  <Input v-model="item.value" placeholder="期望值（如 200 或 1）" class="border-gray-300" />
                 </div>
                 <div class="col-span-1">
                   <Button variant="ghost" size="sm" class="text-gray-400 hover:text-red-600" @click="removeAssertion(index)">

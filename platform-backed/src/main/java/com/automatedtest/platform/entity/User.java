@@ -35,6 +35,18 @@ public class User implements Serializable {
     @TableField("enable_notification")
     private Boolean enableNotification;
 
+    @TableField("notification_rule")
+    private String notificationRule;
+
+    @TableField("notification_threshold")
+    private Integer notificationThreshold;
+
+    @TableField("max_teams")
+    private Integer maxTeams;
+
+    @TableField("max_projects")
+    private Integer maxProjects;
+
     @TableField("last_login_at")
     private LocalDateTime lastLoginAt;
 

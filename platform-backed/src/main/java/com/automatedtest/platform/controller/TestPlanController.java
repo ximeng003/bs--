@@ -58,6 +58,9 @@ public class TestPlanController {
     @Autowired
     private WebhookClient webhookClient;
     
+    @Autowired
+    private com.automatedtest.platform.service.ProjectVariableService projectVariableService;
+    
     private boolean hasProjectAccess(Integer projectId, Long userId) {
         if (projectId == null || userId == null) return false;
         Project project = projectService.getById(projectId);
@@ -65,7 +68,7 @@ public class TestPlanController {
         
         long count = teamMemberService.count(new QueryWrapper<TeamMember>()
                 .eq("team_id", project.getTeamId())
-                .eq("user_id", userId));
+                .eq("user_id", userId.intValue()));
         return count > 0;
     }
 
@@ -300,21 +303,77 @@ public class TestPlanController {
             summary.put("planSummaryReportId", planSummaryReportId);
         }
 
-        // Send Notification if enabled and failed
-        if (failedCount > 0 && userId != null) {
-            User owner = userService.getById(userId);
+        double passRate = total > 0 ? (successCount * 100.0) / total : 0.0;
+        double coverage = 0.0;
+        long totalProjectCases = testCaseService.count(new QueryWrapper<TestCase>().eq("project_id", plan.getProjectId()));
+        if (totalProjectCases > 0) {
+            java.util.Set<Integer> uniq = new java.util.HashSet<>(caseIds);
+            coverage = (uniq.size() * 100.0) / totalProjectCases;
+        }
+        double stability = 0.0;
+        java.util.List<TestReport> recent = testReportService.list(new QueryWrapper<TestReport>()
+                .eq("project_id", plan.getProjectId())
+                .orderByDesc("executed_at")
+                .last("LIMIT 50"));
+        if (recent != null && !recent.isEmpty()) {
+            long ok = recent.stream().filter(r -> "success".equalsIgnoreCase(String.valueOf(r.getStatus()))).count();
+            stability = (ok * 100.0) / recent.size();
+        }
+        double healthScore = passRate * 0.6 + coverage * 0.2 + stability * 0.2;
+        summary.put("passRate", passRate);
+        summary.put("coverage", coverage);
+        summary.put("stability", stability);
+        summary.put("healthScore", healthScore);
+        projectService.updateHealthScoreAsync(plan.getProjectId(), healthScore);
+        com.automatedtest.platform.entity.ProjectVariable hs = projectVariableService.getOne(new QueryWrapper<com.automatedtest.platform.entity.ProjectVariable>()
+                .eq("project_id", plan.getProjectId())
+                .eq("key_name", "health_score"));
+        if (hs == null) {
+            hs = new com.automatedtest.platform.entity.ProjectVariable();
+            hs.setProjectId(plan.getProjectId());
+            hs.setKeyName("health_score");
+            hs.setValue(String.format(java.util.Locale.ROOT, "%.2f", healthScore));
+            projectVariableService.save(hs);
+        } else {
+            hs.setValue(String.format(java.util.Locale.ROOT, "%.2f", healthScore));
+            projectVariableService.updateById(hs);
+        }
+
+        Long ownerId = null;
+        if (plan.getCreatedBy() != null) {
+            ownerId = Long.valueOf(plan.getCreatedBy());
+        } else if (userId != null) {
+            ownerId = userId;
+        }
+
+        if (ownerId != null) {
+            User owner = userService.getById(ownerId);
             if (owner != null && Boolean.TRUE.equals(owner.getEnableNotification()) && owner.getNotificationWebhook() != null) {
-                String title = "测试计划执行失败告警: " + plan.getName();
-                String content = String.format(
-                    "**执行人**: %s\n\n**环境**: %s\n\n**总用例数**: %d\n\n**通过**: %d\n\n**失败**: %d\n\n**耗时**: %dms\n\n请及时查看报告。",
-                    executedBy != null ? executedBy : "System",
-                    plan.getEnvironment(),
-                    total,
-                    successCount,
-                    failedCount,
-                    totalDuration
-                );
-                webhookClient.sendNotification(owner.getNotificationWebhook(), title, content);
+                String rule = owner.getNotificationRule() != null ? owner.getNotificationRule().trim() : "on_fail";
+                Integer threshold = owner.getNotificationThreshold() != null ? owner.getNotificationThreshold() : 80;
+                boolean shouldNotify = false;
+                if ("all".equalsIgnoreCase(rule)) {
+                    shouldNotify = true;
+                } else if ("low_pass_rate".equalsIgnoreCase(rule)) {
+                    shouldNotify = passRate < threshold;
+                } else {
+                    shouldNotify = failedCount > 0;
+                }
+
+                if (shouldNotify) {
+                    String title = "测试计划通知: " + plan.getName();
+                    String content = String.format(
+                        "**执行人**: %s\n\n**环境**: %s\n\n**总用例数**: %d\n\n**通过**: %d\n\n**失败**: %d\n\n**通过率**: %.2f%%\n\n**耗时**: %dms",
+                        executedBy != null ? executedBy : "System",
+                        plan.getEnvironment(),
+                        total,
+                        successCount,
+                        failedCount,
+                        passRate,
+                        totalDuration
+                    );
+                    webhookClient.sendNotification(owner.getNotificationWebhook(), title, content);
+                }
             }
         }
 

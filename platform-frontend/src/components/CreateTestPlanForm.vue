@@ -29,6 +29,7 @@ const form = ref({
 })
 
 const testCases = ref<any[]>([])
+const environments = ref<{ id?: number; name: string; keyName: string }[]>([])
 
 const handleClose = () => {
   emit('close')
@@ -42,6 +43,16 @@ const fetchTestCases = async () => {
     }
   } catch (e) {
     console.error(e)
+  }
+}
+
+const fetchEnvironments = async () => {
+  try {
+    const res: any = await request.get('/environments')
+    const arr = Array.isArray(res) ? res : []
+    environments.value = arr.map((e: any) => ({ id: e.id, name: e.name, keyName: e.keyName }))
+  } catch {
+    environments.value = []
   }
 }
 
@@ -85,6 +96,7 @@ watch(
 
 onMounted(() => {
   fetchTestCases()
+  fetchEnvironments()
 })
 
 const submitLabel = computed(() => (props.mode === 'edit' ? '保存' : '创建计划'))
@@ -117,7 +129,7 @@ const handleSubmit = async () => {
     }
     emit('success')
     showToast(props.mode === 'edit' ? '保存成功' : '创建成功', 'success')
-  } catch (e) {
+  } catch (_e) {
     showToast(props.mode === 'edit' ? '保存失败' : '创建失败', 'error')
   }
 }
@@ -142,9 +154,10 @@ const handleSubmit = async () => {
           <SelectValue placeholder="选择运行环境" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="dev">开发环境</SelectItem>
-          <SelectItem value="staging">测试环境</SelectItem>
-          <SelectItem value="production">生产环境</SelectItem>
+          <SelectItem v-for="e in environments" :key="e.keyName" :value="e.keyName">
+            {{ e.name }}（{{ e.keyName }}）
+          </SelectItem>
+          <SelectItem v-if="environments.length === 0" value="dev">开发环境（dev）</SelectItem>
         </SelectContent>
       </Select>
     </div>

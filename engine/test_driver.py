@@ -3,6 +3,9 @@ import json
 import time
 from typing import Any, Dict, Optional
 from unittest.mock import MagicMock
+import contextlib
+import io
+import os
 
 # Patch broken selenium installation (missing modules)
 def patch_selenium():
@@ -38,6 +41,12 @@ def patch_selenium():
 
 patch_selenium()
 
+# Force robust IO encoding for all outputs
+try:
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8:backslashreplace")
+except Exception:
+    pass
+
 def success(result: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "status": "success",
@@ -45,9 +54,13 @@ def success(result: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 def failed(message: str, result: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    try:
+        msg = message.encode("utf-8", "backslashreplace").decode("utf-8", "ignore")
+    except Exception:
+        msg = str(message)
     base = {
         "status": "failed",
-        "error": message
+        "error": msg
     }
     if result:
         base.update(result)
@@ -129,61 +142,123 @@ def run_api(content: Dict[str, Any]) -> Dict[str, Any]:
     return success(result)
 
 def run_web(content: Dict[str, Any]) -> Dict[str, Any]:
-    # Switch to Edge Driver
+    # Prefer Selenium Manager to auto-resolve matching EdgeDriver
     from selenium.webdriver.edge.webdriver import WebDriver as EdgeDriver
     from selenium.webdriver.edge.options import Options
     from selenium.webdriver.edge.service import Service as EdgeService
-    from webdriver_manager.microsoft import EdgeChromiumDriverManager
     import os
     
     ops = Options()
     ops.add_argument("--headless=new")
+    ops.add_argument("--disable-gpu")
+    ops.add_argument("--no-sandbox")
+    ops.add_argument("--window-size=1280,800")
     
-    driver_path = None
-    
-    # 1. Try local explicit path first (User provided path)
-    # Check for msedgedriver.exe in engine folder
-    local_driver_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "msedgedriver.exe")
-    if os.path.exists(local_driver_path):
-        driver_path = local_driver_path
-        
-    # 2. Try webdriver_manager to install matching EdgeDriver
-    if not driver_path:
-        try:
-            # Note: EdgeChromiumDriverManager might fail due to network in China
-            driver_path = EdgeChromiumDriverManager().install()
-        except Exception:
-            pass
-
-    service = EdgeService(executable_path=driver_path) if driver_path else None
-    
-    # If service is None (install failed and no path), standard init might fail but let's try
-    if service:
-        driver = EdgeDriver(service=service, options=ops)
-    else:
-        # Fallback to default (relies on PATH)
-        driver = EdgeDriver(options=ops)
+    driver = None
+    logs_note = []
+    try:
+        # 1) Try Selenium Manager (no executable_path) — best for version matching
+        _sink = io.StringIO()
+        with contextlib.redirect_stdout(_sink), contextlib.redirect_stderr(_sink):
+            service = EdgeService()  # Selenium >=4.6 will download a compatible driver
+            driver = EdgeDriver(service=service, options=ops)
+        logs_note.append("driver: selenium-manager")
+    except Exception as e1:
+        # 2) Fallback to packaged driver under engine/edgedriver_win64/msedgedriver.exe (offline)
+        packaged = os.path.join(os.path.dirname(os.path.abspath(__file__)), "edgedriver_win64", "msedgedriver.exe")
+        if os.path.exists(packaged):
+            try:
+                _sink = io.StringIO()
+                with contextlib.redirect_stdout(_sink), contextlib.redirect_stderr(_sink):
+                    service = EdgeService(executable_path=packaged)
+                    driver = EdgeDriver(service=service, options=ops)
+                logs_note.append("driver: packaged-edgedriver")
+            except Exception:
+                # Re-raise original for clarity
+                raise e1
+        else:
+            # No packaged driver, bubble up the selenium-manager error
+            raise e1
         
     start = time.time()
     logs = []
     try:
-        for step in content.get("script", "").splitlines():
-            s = step.strip()
-            if not s:
-                continue
-            if s.startswith("打开URL:"):
-                url = s.split(":", 1)[1].strip()
-                driver.get(url)
-                logs.append(f"open {url}")
-            elif s.startswith("刷新页面"):
-                driver.refresh()
-                logs.append("refresh")
+        if logs_note:
+            logs.extend(logs_note)
+        # Support two modes: DSL or Python
+        mode = (content.get("language") or content.get("mode") or "dsl").lower()
+        if mode == "python":
+            user_code = content.get("script") or ""
+            import builtins
+            from selenium.webdriver.common.by import By
+            from selenium.webdriver.support.ui import WebDriverWait
+            from selenium.webdriver.support import expected_conditions as EC
+            step_no = {"n": 0}
+            def _append(level: str, text: str):
+                try:
+                    logs.append(f"[{level}] {text}")
+                except Exception:
+                    pass
+            def step(msg, level: str = "INFO"):
+                try:
+                    step_no["n"] += 1
+                    _append(level, f"[步骤 {step_no['n']}] {msg}")
+                except Exception:
+                    _append(level, msg)
+            def log(msg):
+                try:
+                    _append("INFO", str(msg))
+                except Exception:
+                    pass
+            def assert_equal(expected, actual, context: str = ""):
+                if str(expected) == str(actual):
+                    _append("ASSERT", f"断言通过: {context} | 预期: {expected} | 实际: {actual}")
+                    return True
+                else:
+                    _append("ASSERT", f"断言失败: {context} | 预期: {expected} | 实际: {actual}")
+                    raise AssertionError(f"assert_equal failed: expect {expected} got {actual} ({context})")
+            def assert_title_contains(keyword: str):
+                k = str(keyword)
+                if k in (driver.title or ""):
+                    _append("ASSERT", f'断言通过: 标题包含 "{k}"')
+                else:
+                    _append("ASSERT", f'断言失败: 标题不包含 "{k}" | 实际: {driver.title}')
+                    raise AssertionError(f"title not contains {k}")
+            # Limit builtins available during exec for safety (lightweight)
+            safe_builtins = {
+                "True": True, "False": False, "None": None, "len": len, "range": range, "print": log
+            }
+            glb = {"__builtins__": safe_builtins, "By": By, "WebDriverWait": WebDriverWait, "EC": EC, "time": time}
+            lcl = {"driver": driver, "log": log, "step": step, "assert_equal": assert_equal, "assert_title_contains": assert_title_contains}
+            exec(compile(user_code, "<user_web_script>", "exec"), glb, lcl)
+        else:
+            for step in content.get("script", "").splitlines():
+                s = step.strip()
+                if not s:
+                    continue
+                if s.startswith("打开URL:"):
+                    url = s.split(":", 1)[1].strip()
+                    driver.get(url)
+                    logs.append(f"open {url}")
+                elif s.startswith("刷新页面"):
+                    driver.refresh()
+                    logs.append("refresh")
         duration = int((time.time() - start) * 1000)
-        result = {"durationMs": duration, "logs": "\n".join(logs)}
+        safe_logs = "\n".join(logs)
+        try:
+            safe_logs = safe_logs.encode("utf-8", "backslashreplace").decode("utf-8", "ignore")
+        except Exception:
+            pass
+        result = {"durationMs": duration, "logs": safe_logs}
         return success(result)
     except Exception as e:
         duration = int((time.time() - start) * 1000)
-        return failed(str(e), {"durationMs": duration, "logs": "\n".join(logs)})
+        safe_logs = "\n".join(logs)
+        try:
+            safe_logs = safe_logs.encode("utf-8", "backslashreplace").decode("utf-8", "ignore")
+        except Exception:
+            pass
+        return failed(str(e), {"durationMs": duration, "logs": safe_logs})
     finally:
         driver.quit()
 
@@ -286,12 +361,28 @@ def run_app(content: Dict[str, Any]) -> Dict[str, Any]:
             driver.quit()
 
 def main():
-    raw = sys.stdin.read()
+    try:
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+        if hasattr(sys.stderr, "reconfigure"):
+            sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
+    except Exception:
+        pass
+    # Read stdin as bytes and decode safely to avoid surrogate issues
+    try:
+        raw_bytes = sys.stdin.buffer.read()
+        raw = raw_bytes.decode("utf-8", "replace")
+    except Exception:
+        raw = sys.stdin.read()
     try:
         payload = json.loads(raw)
     except Exception as e:
         result = failed(f"invalid payload: {e}", {"logs": raw})
-        print(json.dumps(result, ensure_ascii=False))
+        txt = json.dumps(result, ensure_ascii=False)
+        try:
+            sys.stdout.buffer.write(txt.encode('utf-8', 'backslashreplace'))
+        except Exception:
+            sys.stdout.write(txt)
         return
     typ = payload.get("type")
     content = payload.get("content") or {}
@@ -306,7 +397,11 @@ def main():
             result = failed(f"unsupported type: {typ}")
     except Exception as e:
         result = failed(str(e))
-    print(json.dumps(result, ensure_ascii=False))
+    txt = json.dumps(result, ensure_ascii=False)
+    try:
+        sys.stdout.buffer.write(txt.encode('utf-8', 'backslashreplace'))
+    except Exception:
+        sys.stdout.write(txt)
 
 if __name__ == "__main__":
     main()

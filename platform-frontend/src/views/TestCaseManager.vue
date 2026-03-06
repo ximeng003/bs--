@@ -11,6 +11,7 @@ import Label from '@/components/ui/label/Label.vue'
 import { Search, Pencil, Trash2, Play, Code, Loader2 } from 'lucide-vue-next'
 import request from '@/api/request'
 import { showToast, openConfirm } from '@/lib/notify'
+import Switch from '@/components/ui/switch/Switch.vue'
 
 const router = useRouter()
 
@@ -28,6 +29,12 @@ interface TestCase {
   updatedAt?: string;
 }
 
+interface EnvironmentItem {
+  id?: number
+  name: string
+  keyName: string
+}
+
 const testCases = ref<TestCase[]>([])
 const loading = ref(false)
 const executingCaseId = ref<string | null>(null)
@@ -42,6 +49,59 @@ const logDialogOpen = ref(false)
 const logDialogTitle = ref('')
 const logDialogMessage = ref('')
 const logDialogDetail = ref('')
+const logDialogTab = ref<'logs' | 'body'>('logs')
+const logBodyRaw = ref('')
+const isBodyPretty = ref(true)
+const lastReportId = ref<number | null>(null)
+const lastRunEnv = ref<string>('') 
+const lastRunDurationMs = ref<number | null>(null)
+const isLogFullscreen = ref(false)
+const logSearch = ref('')
+const filteredLog = computed(() => {
+  const raw = logDialogDetail.value || ''
+  const kw = (logSearch.value || '').trim()
+  if (!kw) return raw
+  const lines = raw.split(/\r?\n/)
+  return lines.filter(l => l.toLowerCase().includes(kw.toLowerCase())).join('\n')
+})
+const stepsOnly = ref(false)
+const coloredLogLines = computed(() => {
+  const txt = (logDialogDetail.value || '').toString()
+  const lines = txt.split(/\r?\n/)
+  const out: { text: string; level: 'error'|'warn'|'assert'|'info'; visible: boolean }[] = []
+  for (const line of lines) {
+    if (!line) continue
+    const lower = line.toLowerCase()
+    let level: 'error'|'warn'|'assert'|'info' = 'info'
+    if (/\b(error|失败)/i.test(line) || lower.includes('[error]')) level = 'error'
+    else if (/\b(warn|重试|slow)/i.test(line) || lower.includes('[warn]')) level = 'warn'
+    else if (/\b(assert|断言)/i.test(line) || lower.includes('[assert]')) level = 'assert'
+    const isStep = /步骤\s*\d+/.test(line) || /\b(断言|assert)\b/i.test(line)
+    out.push({ text: line, level, visible: stepsOnly.value ? isStep : true })
+  }
+  return out
+})
+const copyLogs = async () => {
+  const text = logDialogDetail.value || ''
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text)
+      showToast('已复制日志', 'success')
+    } else {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+      showToast('已复制日志', 'success')
+    }
+  } catch {
+    showToast('复制失败', 'error')
+  }
+}
 
 const formatEnvironment = (env: string) => {
   if (!env) return ''
@@ -79,6 +139,13 @@ const isAllSelected = computed(
   () => visibleTestCases.value.length > 0 && visibleTestCases.value.every(tc => selectedCaseIds.value.includes(tc.id))
 )
 
+const sanitizeDesc = (d: any) => {
+  const s = (d ?? '').toString().trim()
+  if (!s) return ''
+  if (s === 'Updated from API Editor' || s === 'Updated from Script Editor') return ''
+  return s
+}
+
 const fetchTestCases = async () => {
   loading.value = true
   try {
@@ -96,6 +163,7 @@ const fetchTestCases = async () => {
       const indexOffset = (currentPage.value - 1) * pageSize.value
       const mapped = res.records.map((r: any, idx: number) => ({
         ...r,
+        description: sanitizeDesc(r.description),
         displayIndex: indexOffset + idx + 1,
         createdAt: r.createdAt || r.created_at || r.createdAtStr || r.created || '',
         updatedAt: r.updatedAt || r.updated_at || r.updatedAtStr || r.updated || ''
@@ -112,6 +180,7 @@ const fetchTestCases = async () => {
       const indexOffset = (currentPage.value - 1) * pageSize.value
       const mapped = res.map((r: any, idx: number) => ({
         ...r,
+        description: sanitizeDesc(r.description),
         displayIndex: indexOffset + idx + 1,
         createdAt: r.createdAt || r.created_at || r.createdAtStr || r.created || '',
         updatedAt: r.updatedAt || r.updated_at || r.updatedAtStr || r.updated || ''
@@ -152,7 +221,7 @@ const handleDelete = async (id: string) => {
     await request.delete(`/testcases/${id}`)
     await fetchTestCases()
     showToast('删除成功', 'success')
-  } catch (e) {
+  } catch (_e) {
     showToast('删除失败', 'error')
   }
 }
@@ -172,7 +241,7 @@ const handleBatchDelete = async () => {
     await Promise.all(selectedCaseIds.value.map(id => request.delete(`/testcases/${id}`)))
     selectedCaseIds.value = []
     await fetchTestCases()
-  } catch (e) {
+  } catch (_e) {
     showToast('批量删除失败', 'error')
   }
 }
@@ -188,7 +257,7 @@ const handleDeleteAll = async () => {
     await request.delete('/testcases')
     selectedCaseIds.value = []
     await fetchTestCases()
-  } catch (e) {
+  } catch (_e) {
     showToast('清空失败', 'error')
   }
 }
@@ -199,18 +268,29 @@ const handleRun = async (id: string) => {
   showToast('正在执行中，请稍候...', 'info')
   try {
     const res: any = await request.post(`/testcases/${id}/execute`)
+    const tc = testCases.value.find(t => t.id === id)
+    lastRunEnv.value = tc?.environment ? formatEnvironment(tc.environment) : ''
+    lastReportId.value = typeof res?.reportId === 'number' ? res.reportId : null
+    lastRunDurationMs.value = typeof res?.durationMs === 'number' ? res.durationMs : null
+    logDialogTab.value = 'logs'
+    logBodyRaw.value = ''
     await fetchTestCases()
     if (res?.status === 'success') {
       showToast('执行成功', 'success')
       const resp = res?.response || {}
       const statusCode = resp.statusCode ?? resp.status ?? ''
       const duration = res?.durationMs ?? ''
+      const aTotal = typeof res?.assertsTotal === 'number' ? res.assertsTotal : null
+      const aPass = typeof res?.assertsPassed === 'number' ? res.assertsPassed : null
       const titleParts: string[] = []
       if (statusCode !== '') {
         titleParts.push(`状态码 ${statusCode}`)
       }
       if (duration !== '') {
         titleParts.push(`耗时 ${duration} ms`)
+      }
+      if (aTotal !== null && aPass !== null) {
+        titleParts.push(`断言 ${aPass}/${aTotal}`)
       }
       logDialogTitle.value = titleParts.length ? `执行成功（${titleParts.join('，')}）` : '执行成功'
       logDialogMessage.value = ''
@@ -228,16 +308,36 @@ const handleRun = async (id: string) => {
         }
         bodyPreview = pretty.length > 2000 ? pretty.slice(0, 2000) + '\n...（已截断）' : pretty
       }
+      logBodyRaw.value = bodyPreview || (resp?.body || '')
       logDialogDetail.value = logs || bodyPreview || '执行成功，无额外日志'
       logDialogOpen.value = true
     } else {
       const msg = simplifyError(res?.error)
       showToast('执行失败', 'error')
-      logDialogTitle.value = '执行失败'
+      const aTotal = typeof res?.assertsTotal === 'number' ? res.assertsTotal : null
+      const aPass = typeof res?.assertsPassed === 'number' ? res.assertsPassed : null
+      logDialogTitle.value = aTotal !== null && aPass !== null
+        ? `执行失败（断言 ${aPass}/${aTotal}）`
+        : '执行失败'
       logDialogMessage.value = msg
       const rawError = typeof res?.error === 'string' ? res.error : ''
       const logs = typeof res?.logs === 'string' ? res.logs : ''
-      logDialogDetail.value = logs || rawError
+      const resp = res?.response || {}
+      let body = ''
+      if (resp && typeof resp.body === 'string' && resp.body) {
+        try {
+          const trimmed = resp.body.trim()
+          if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+            body = JSON.stringify(JSON.parse(resp.body), null, 2)
+          } else {
+            body = resp.body
+          }
+        } catch {
+          body = resp.body
+        }
+      }
+      logBodyRaw.value = body
+      logDialogDetail.value = logs || rawError || body
       logDialogOpen.value = true
     }
   } catch (e: any) {
@@ -245,6 +345,7 @@ const handleRun = async (id: string) => {
     logDialogTitle.value = '执行异常'
     logDialogMessage.value = '后端返回错误，请查看下方详细日志'
     logDialogDetail.value = e?.response?.data || e?.message || ''
+    logBodyRaw.value = ''
     logDialogOpen.value = true
   } finally {
     executingCaseId.value = null
@@ -281,13 +382,25 @@ const handleSaveEdit = async () => {
         editDialogOpen.value = false
         fetchTestCases()
         showToast('保存成功', 'success')
-    } catch (e) {
+    } catch (_e) {
         showToast('保存失败', 'error')
     }
 }
 
+const envOptions = ref<EnvironmentItem[]>([])
+const fetchEnvOptions = async () => {
+  try {
+    const res: any = await request.get('/environments')
+    const arr = Array.isArray(res) ? res : []
+    envOptions.value = arr.map((e: any) => ({ id: e.id, name: e.name, keyName: e.keyName }))
+  } catch {
+    envOptions.value = []
+  }
+}
+
 onMounted(() => {
   fetchTestCases()
+  fetchEnvOptions()
 })
 
 watch([searchTerm, filterType, sortMode, pageSizeStr], () => {
@@ -365,11 +478,15 @@ const getTypeBadgeClass = (type: string) => {
 <template>
   <div class="space-y-6 p-6">
     <Dialog v-model:open="logDialogOpen">
-      <DialogContent class="sm:max-w-[520px]">
+      <DialogContent :class="isLogFullscreen ? 'sm:max-w-[90vw] w-[90vw] max-h-[80vh]' : 'sm:max-w-[560px]'">
         <DialogHeader>
           <DialogTitle>{{ logDialogTitle || '执行日志' }}</DialogTitle>
         </DialogHeader>
-        <div class="mt-4 space-y-4 max-w-[420px] mx-auto">
+        <div :class="['mt-4 space-y-4', isLogFullscreen ? 'max-w-none mx-0' : 'max-w-[420px] mx-auto']">
+          <div class="flex items-center justify-between text-xs text-gray-500" v-if="lastRunEnv || lastRunDurationMs !== null">
+            <div v-if="lastRunEnv">环境: {{ lastRunEnv }}</div>
+            <div v-if="lastRunDurationMs !== null">耗时: {{ lastRunDurationMs }} ms</div>
+          </div>
           <div v-if="logDialogMessage">
             <div class="text-xs text-gray-500 mb-1">错误信息</div>
             <div
@@ -379,16 +496,69 @@ const getTypeBadgeClass = (type: string) => {
             </div>
           </div>
           <div>
-            <div class="text-xs text-gray-500 mb-1">日志输出</div>
-            <div
-              class="bg-gray-900 text-green-400 rounded-md p-3 text-xs font-mono max-h-[260px] overflow-y-auto whitespace-pre-wrap"
-            >
-              {{ logDialogDetail || '暂无日志' }}
+            <div class="flex items-center justify-between mb-1 flex-wrap gap-2">
+              <div class="flex items-center gap-3">
+                <div class="inline-flex bg-gray-100 rounded p-0.5">
+                  <button
+                    class="px-3 py-1 text-xs rounded"
+                    :class="logDialogTab==='logs' ? 'bg-white text-blue-600 shadow border' : 'text-gray-600'"
+                    @click="logDialogTab='logs'">Logs</button>
+                  <button
+                    class="px-3 py-1 text-xs rounded"
+                    :class="logDialogTab==='body' ? 'bg-white text-blue-600 shadow border' : 'text-gray-600'"
+                    @click="logDialogTab='body'">Body</button>
+                </div>
+                <div v-if="logDialogTab==='logs'" class="hidden md:flex items-center gap-2 text-[11px] text-gray-500">
+                  <span class="inline-flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-full bg-green-400"></span>ASSERT</span>
+                  <span class="inline-flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-full bg-yellow-300"></span>WARN</span>
+                  <span class="inline-flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-full bg-red-400"></span>ERROR</span>
+                </div>
+              </div>
+              <div class="flex items-center gap-2 shrink-0" v-if="logDialogTab==='logs'">
+                <div class="flex items-center gap-1 text-xs text-gray-600">
+                  <Switch v-model:checked="stepsOnly" />
+                  <span>仅步骤</span>
+                </div>
+                <Input v-model="logSearch" placeholder="搜索日志/步骤" class="h-8 w-36 sm:w-44" />
+                <Button variant="outline" size="sm" class="h-8 px-3" @click="copyLogs">复制</Button>
+                <Button variant="outline" size="sm" class="h-8 px-3" @click="isLogFullscreen = !isLogFullscreen">{{ isLogFullscreen ? '退出全屏' : '全屏' }}</Button>
+              </div>
+              <div class="flex items-center gap-2" v-else>
+                <Button variant="outline" size="sm" @click="isBodyPretty = !isBodyPretty">{{ isBodyPretty ? '原文' : '格式化' }}</Button>
+              </div>
             </div>
+            <template v-if="logDialogTab==='logs'">
+              <div :class="['bg-gray-900 rounded-md p-4 font-mono overflow-y-auto', isLogFullscreen ? 'h-[60vh] text-[14px] leading-7' : 'text-xs min-h-[220px] max-h-[260px]']">
+                <div v-for="(l, idx) in coloredLogLines" :key="idx" v-show="l.visible"
+                     :class="{
+                       'text-red-400': l.level==='error',
+                       'text-yellow-300': l.level==='warn',
+                       'text-green-400': l.level==='assert',
+                       'text-gray-300': l.level==='info'
+                     }"
+                     class="whitespace-pre-wrap">
+                  {{ l.text }}
+                </div>
+                <div v-if="!coloredLogLines.length" class="text-gray-500">暂无日志</div>
+              </div>
+            </template>
+            <template v-else>
+              <div :class="['bg-gray-900 rounded-md p-4 font-mono overflow-y-auto w-full', isLogFullscreen ? 'h-[60vh] text-[14px] leading-7' : 'text-xs min-h-[220px] max-h-[260px]']">
+                <pre class="text-gray-200 whitespace-pre-wrap w-full">
+{{ isBodyPretty ? logBodyRaw : (logBodyRaw || '') }}
+                </pre>
+              </div>
+            </template>
           </div>
         </div>
-        <div class="flex justify-end mt-4 max-w-[420px] mx-auto">
-          <Button @click="logDialogOpen = false">关闭</Button>
+        <div class="flex justify-between mt-4 max-w-[420px] mx-auto">
+          <div />
+          <div class="flex gap-2">
+            <Button v-if="lastReportId !== null" variant="outline" @click="() => { router.push(`/reports/${lastReportId}`); }">
+              查看详情报告
+            </Button>
+            <Button @click="logDialogOpen = false">关闭</Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
@@ -418,7 +588,16 @@ const getTypeBadgeClass = (type: string) => {
           </div>
           <div class="grid grid-cols-4 items-center gap-4">
             <Label class="text-right">环境</Label>
-            <Input v-model="editingCase.environment" class="col-span-3" />
+            <Select v-model="editingCase.environment">
+              <SelectTrigger class="col-span-3">
+                <SelectValue placeholder="选择环境" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem v-for="e in envOptions" :key="e.keyName" :value="e.keyName">
+                  {{ e.name }}（{{ e.keyName }}）
+                </SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <div class="grid grid-cols-4 items-center gap-4">
             <Label class="text-right">描述</Label>
@@ -525,7 +704,10 @@ const getTypeBadgeClass = (type: string) => {
                     {{ getResultText(testCase.lastResult) }}
                   </Badge>
                 </div>
-                <p class="text-sm text-gray-500">{{ testCase.description }}</p>
+                <p v-if="testCase.description && String(testCase.description).trim().length"
+                   class="text-sm text-gray-500">
+                  {{ testCase.description }}
+                </p>
                 <div class="flex items-center gap-4 text-xs text-gray-400 mt-2">
                   <span>序号: #{{ testCase.displayIndex ?? (Number(testCase.id) || 0) }}</span>
                   <span v-if="testCase.lastRun">最后运行: {{ testCase.lastRun }}</span>

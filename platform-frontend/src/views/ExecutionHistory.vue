@@ -214,7 +214,7 @@ const handleBatchDelete = async () => {
     await Promise.all(selectedIds.value.map(id => request.delete(`/reports/${id}`)))
     selectedIds.value = []
     await fetchReports()
-  } catch (e) {
+  } catch (_e) {
     showToast('批量删除失败', 'error')
   }
 }
@@ -230,7 +230,7 @@ const handleDeleteAll = async () => {
     await request.delete('/reports')
     selectedIds.value = []
     await fetchReports()
-  } catch (e) {
+  } catch (_e) {
     showToast('清空失败', 'error')
   }
 }

@@ -11,6 +11,10 @@ public class DashboardStatsDTO {
     private long failedCases;
     private long totalExecutions;
     private double avgDuration; // in seconds
+    private double passRate; // 0-100
+    private double coverage; // 0-100
+    private double stability; // 0-100
+    private double healthScore; // 0-100
     
     private List<DailyTrendDTO> dailyTrend;
     private List<RecentActivityDTO> recentActivity;

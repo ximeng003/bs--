@@ -267,11 +267,52 @@ def run_app(content: Dict[str, Any]) -> Dict[str, Any]:
     from appium.webdriver.common.appiumby import AppiumBy
     from selenium.webdriver.support.ui import WebDriverWait
     from selenium.webdriver.support import expected_conditions as EC
+    try:
+        from appium.options.android import UiAutomator2Options
+    except Exception:
+        UiAutomator2Options = None
 
     def build_driver(appium_conf: Dict[str, Any]):
         remote_url = appium_conf.get("remoteUrl") or appium_conf.get("remote_url") or "http://127.0.0.1:4723"
         caps = appium_conf.get("capabilities") or {}
-        return webdriver.Remote(remote_url, caps)
+        # Normalize keys for W3C/Appium 2 (prefix appium:)
+        normalized = {}
+        for k, v in caps.items():
+            key = k
+            if k in ("automationName", "deviceName", "appPackage", "appActivity", "udid", "platformVersion", "chromedriverExecutable"):
+                key = f"appium:{k}"
+            normalized[key] = v
+        # platformName should be non-prefixed
+        if "platformName" in caps:
+            normalized["platformName"] = caps["platformName"]
+        # Fallback defaults
+        normalized.setdefault("platformName", "Android")
+        normalized.setdefault("appium:automationName", caps.get("automationName") or "UiAutomator2")
+        # System app safety: avoid clearing data for com.android.* when user not specifying reset flags
+        pkg = normalized.get("appium:appPackage") or caps.get("appPackage")
+        if pkg and isinstance(pkg, str) and pkg.startswith("com.android."):
+            normalized.setdefault("appium:noReset", True)
+            normalized.setdefault("appium:fullReset", False)
+        # Respect unprefixed reset flags if provided
+        if "noReset" in caps and "appium:noReset" not in normalized:
+            normalized["appium:noReset"] = caps.get("noReset")
+        if "fullReset" in caps and "appium:fullReset" not in normalized:
+            normalized["appium:fullReset"] = caps.get("fullReset")
+        # Use Options API when available to avoid to_capabilities None issues
+        if UiAutomator2Options is not None:
+            opts = UiAutomator2Options()
+            try:
+                opts.load_capabilities(normalized)
+            except Exception:
+                # load_capabilities may expect dict with proper types; ensure dict
+                for k, v in normalized.items():
+                    try:
+                        opts.set_capability(k, v)
+                    except Exception:
+                        pass
+            return webdriver.Remote(remote_url, options=opts)
+        # Legacy fallback for very old client versions
+        return webdriver.Remote(remote_url, normalized)
 
     def find_element(driver, step: Dict[str, Any]):
         by = (step.get("by") or "xpath").lower()

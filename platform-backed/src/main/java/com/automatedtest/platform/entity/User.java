@@ -58,4 +58,31 @@ public class User implements Serializable {
 
     @TableField(value = "updated_at", fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updatedAt;
+    
+    public String getRole() { return role; }
+    public String getUsername() { return username; }
+    public Long getId() { return id; }
+    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
+    public void setRole(String role) { this.role = role; }
+    public Integer getMaxTeams() { return maxTeams; }
+    public String getNickname() { return nickname; }
+    public String getAvatar() { return avatar; }
+    public String getPassword() { return password; }
+    public void setPassword(String password) { this.password = password; }
+    public void setLastLoginAt(LocalDateTime lastLoginAt) { this.lastLoginAt = lastLoginAt; }
+    public void setLastLoginIp(String lastLoginIp) { this.lastLoginIp = lastLoginIp; }
+    public Integer getMaxProjects() { return maxProjects; }
+    public Boolean getEnableNotification() { return enableNotification; }
+    public String getNotificationWebhook() { return notificationWebhook; }
+    public String getNotificationRule() { return notificationRule; }
+    public Integer getNotificationThreshold() { return notificationThreshold; }
+    public void setMaxProjects(Integer maxProjects) { this.maxProjects = maxProjects; }
+    public void setNotificationWebhook(String notificationWebhook) { this.notificationWebhook = notificationWebhook; }
+    public void setEnableNotification(Boolean enableNotification) { this.enableNotification = enableNotification; }
+    public void setNotificationRule(String notificationRule) { this.notificationRule = notificationRule; }
+    public void setNotificationThreshold(Integer notificationThreshold) { this.notificationThreshold = notificationThreshold; }
+    public void setNickname(String nickname) { this.nickname = nickname; }
+    public void setEmail(String email) { this.email = email; }
+    public void setPhone(String phone) { this.phone = phone; }
+    public void setAvatar(String avatar) { this.avatar = avatar; }
 }

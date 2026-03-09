@@ -97,7 +97,30 @@ public class TestReportController {
         }
         
         if (StringUtils.hasText(keyword)) {
-            queryWrapper.like("logs", keyword).or().eq("id", keyword);
+            String kw = keyword.trim();
+            queryWrapper.and(wrapper -> {
+                wrapper.like("logs", kw).or().eq("id", kw);
+                
+                // Search for matching test cases
+                QueryWrapper<TestCase> caseQuery = new QueryWrapper<>();
+                caseQuery.like("name", kw);
+                if (projectId != null) caseQuery.eq("project_id", projectId);
+                List<TestCase> cases = testCaseService.list(caseQuery);
+                if (cases != null && !cases.isEmpty()) {
+                    List<Integer> ids = cases.stream().map(TestCase::getId).collect(java.util.stream.Collectors.toList());
+                    wrapper.or().in("case_id", ids);
+                }
+                
+                // Search for matching test plans
+                QueryWrapper<TestPlan> planQuery = new QueryWrapper<>();
+                planQuery.like("name", kw);
+                if (projectId != null) planQuery.eq("project_id", projectId);
+                List<TestPlan> plans = testPlanService.list(planQuery);
+                if (plans != null && !plans.isEmpty()) {
+                    List<Integer> ids = plans.stream().map(TestPlan::getId).collect(java.util.stream.Collectors.toList());
+                    wrapper.or().in("plan_id", ids);
+                }
+            });
         }
 
         if (StringUtils.hasText(date)) {
@@ -111,7 +134,6 @@ public class TestReportController {
             }
         }
         
-        queryWrapper.eq("is_deleted", 0);
         queryWrapper.orderByDesc("executed_at");
         queryWrapper.orderByDesc("id");
 
@@ -214,6 +236,7 @@ public class TestReportController {
         dto.setLogs(report.getLogs());
         dto.setExecutedAt(report.getExecutedAt());
         dto.setExecutedBy(report.getExecutedBy());
+        dto.setTriggerType(report.getTriggerType());
         dto.setAssertsTotal(report.getAssertsTotal());
         dto.setAssertsPassed(report.getAssertsPassed());
         dto.setAssertsFailed(report.getAssertsFailed());

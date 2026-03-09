@@ -239,7 +239,7 @@ const handleDeleteParameter = (index: number) => {
 }
 
 // --- Teams Management (Admin) ---
-interface Team { id: number; name: string; description?: string }
+interface Team { id: number; name: string; description?: string; role?: string }
 interface TeamMember { id: number; username: string; nickname?: string; avatar?: string; role: 'member' | 'admin'; joinedAt: string }
 interface Project { id: number; name: string; description?: string; teamId?: number; createdAt?: string }
 
@@ -296,12 +296,22 @@ const handleCreateTeam = async () => {
 }
 
 const handleDeleteTeam = async (id: number) => {
+  const teamName = teams.value.find(t => t.id === id)?.name || ''
   const ok = await openConfirm({
     title: '删除团队',
-    message: '确定要删除该团队吗？将同时清空成员关系。',
+    message: `确定要删除团队「${teamName || id}」吗？该操作不可恢复。\n\n为防误删，请输入团队名称确认。`,
     confirmText: '删除',
   })
   if (!ok) return
+  const input = await openInputConfirm({
+    title: '输入确认',
+    message: `请输入团队名称「${teamName}」以确认删除`,
+    placeholder: '团队名称',
+    expected: teamName,
+    confirmText: '删除',
+    cancelText: '取消'
+  })
+  if (!input) return
   try {
     await request.delete(`/teams/${id}`)
     showToast('团队删除成功', 'success')
@@ -311,6 +321,7 @@ const handleDeleteTeam = async (id: number) => {
     showToast(msg, 'error')
   }
 }
+
 
 const openTeamSettings = async (team: Team) => {
   currentTeam.value = team
@@ -372,6 +383,17 @@ const handleUpdateMemberRole = async (member: TeamMember, role: 'member' | 'admi
     await request.put(`/teams/${currentTeam.value.id}/members/${member.id}`, { role })
     showToast('角色更新成功', 'success')
     fetchTeamMembers(currentTeam.value.id)
+    // Refresh teams list so "我的角色"列实时更新
+    await fetchTeams()
+    // If the edited member is the current user, update local teams list immediately
+    try {
+      if (String(member.username || '').trim() === String(userStore.user?.username || '').trim()) {
+        const idx = teams.value.findIndex(t => t.id === currentTeam.value!.id)
+        if (idx >= 0) {
+          teams.value[idx] = { ...teams.value[idx], role }
+        }
+      }
+    } catch {}
   } catch (e) {
     const msg = (e as Error)?.message || '更新失败'
     showToast(msg, 'error')
@@ -399,6 +421,11 @@ const fetchProjects = async () => {
   }
 }
 
+const canArchiveProject = (p: any) => {
+  const isSystemAdmin = String(userStore.user?.role || '').toLowerCase() === 'admin'
+  const isTeamAdmin = String((p as any)?.role || '').toLowerCase() === 'admin'
+  return isSystemAdmin || isTeamAdmin
+}
 const archivedProjects = ref<Project[]>([])
 const fetchArchivedProjects = async () => {
   try {
@@ -442,27 +469,64 @@ const handleCreateProject = async () => {
 }
 
 const handleDeleteProject = async (id: number) => {
+  const projName = projects.value.find(p => p.id === id)?.name || ''
   const ok = await openConfirm({
-    title: '删除项目',
-    message: '确定要删除该项目吗？此操作不可恢复。',
-    confirmText: '删除',
+    title: '归档项目',
+    message: `确定要归档项目「${projName || id}」吗？归档后项目将不可用，但可以在已归档项目中恢复。\n\n为防误操作，请输入项目名称确认。`,
+    confirmText: '归档'
   })
+  
   if (!ok) return
+  const input = await openInputConfirm({
+    title: '输入确认',
+    message: `请输入项目名称「${projName}」以确认归档`,
+    placeholder: '项目名称',
+    expected: projName,
+    confirmText: '归档',
+    cancelText: '取消'
+  })
+  if (!input) return
+
   try {
     await request.delete(`/projects/${id}`)
-    showToast('项目删除成功', 'success')
+    showToast('项目已归档', 'success')
     fetchProjects()
+    fetchArchivedProjects()
+    
     const currentProjectId = localStorage.getItem('currentProjectId')
     if (currentProjectId && Number(currentProjectId) === Number(id)) {
       localStorage.removeItem('currentProjectId')
       window.location.reload()
     }
-  } catch (e) {
-    const msg = (e as Error)?.message || '删除失败'
-    showToast(msg, 'error')
+  } catch (e: any) {
+    showToast(e.message || '归档失败', 'error')
   }
 }
 
+const handlePurgeProject = async (p: Project) => {
+  const ok = await openConfirm({
+    title: '彻底删除项目',
+    message: `此操作不可恢复，将删除项目「${p.name}」的所有数据（用例、计划、报告、变量、环境、密钥）！\n\n为防误操作，请输入项目名称确认。`,
+    confirmText: '彻底删除'
+  })
+  if (!ok) return
+  const input = await openInputConfirm({
+    title: '输入确认',
+    message: `请输入项目名称「${p.name}」以确认彻底删除`,
+    placeholder: '项目名称',
+    expected: p.name,
+    confirmText: '删除',
+    cancelText: '取消'
+  })
+  if (!input) return
+  try {
+    await request.delete(`/projects/${p.id}/purge`)
+    showToast('项目已彻底删除', 'success')
+    fetchArchivedProjects()
+  } catch (e: any) {
+    showToast(e.message || '删除失败', 'error')
+  }
+}
 const handleRestoreProject = async (id: number) => {
   const ok = await openConfirm({
     title: '恢复项目',
@@ -519,6 +583,52 @@ const rejectPermission = async (id: number) => {
 fetchPermissionRequests()
 fetchProjects()
 fetchArchivedProjects()
+
+const nameConfirm = ref({
+  open: false,
+  title: '',
+  message: '',
+  placeholder: '',
+  expected: '',
+  confirmText: '确认',
+  cancelText: '取消',
+  value: '',
+  resolver: null as null | ((v: string | null) => void)
+})
+
+const openInputConfirm = (opts: { title: string; message: string; placeholder?: string; expected?: string; confirmText?: string; cancelText?: string; }) => {
+  return new Promise<string | null>((resolve) => {
+    nameConfirm.value.open = true
+    nameConfirm.value.title = opts.title
+    nameConfirm.value.message = opts.message
+    nameConfirm.value.placeholder = opts.placeholder || ''
+    nameConfirm.value.expected = opts.expected || ''
+    nameConfirm.value.confirmText = opts.confirmText || '确认'
+    nameConfirm.value.cancelText = opts.cancelText || '取消'
+    nameConfirm.value.value = ''
+    nameConfirm.value.resolver = resolve
+  })
+}
+
+const confirmInputOk = () => {
+  const exp = (nameConfirm.value.expected || '').trim()
+  const val = (nameConfirm.value.value || '').trim()
+  if (exp && val !== exp) {
+    showToast('名称不匹配', 'error')
+    return
+  }
+  const r = nameConfirm.value.resolver
+  nameConfirm.value.open = false
+  nameConfirm.value.resolver = null
+  if (r) { r(val) }
+}
+
+const confirmInputCancel = () => {
+  const r = nameConfirm.value.resolver
+  nameConfirm.value.open = false
+  nameConfirm.value.resolver = null
+  if (r) { r(null) }
+}
 </script>
 
 <template>
@@ -735,8 +845,8 @@ fetchArchivedProjects()
       </TabsContent>
       <!-- Users & Teams Tab -->
       <TabsContent value="teams" class="space-y-4">
-        <div class="space-y-6">
-          <Card class="flex flex-col border-l-4 border-indigo-500">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <Card class="flex flex-col border-l-4 border-indigo-500 h-full">
             <CardHeader class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div class="space-y-1.5">
                 <CardTitle class="flex items-center gap-2">
@@ -750,39 +860,58 @@ fetchArchivedProjects()
               <Button variant="outline" size="sm" @click="fetchPermissionRequests">刷新</Button>
             </CardHeader>
             <CardContent>
-              <div class="rounded-lg border border-gray-100 bg-white overflow-hidden shadow-sm">
-                <Table>
-                  <TableHeader class="bg-gray-50">
-                    <TableRow class="bg-gray-50 hover:bg-gray-50">
-                      <TableHead class="px-6">申请人</TableHead>
-                      <TableHead class="px-6">类型</TableHead>
-                      <TableHead class="px-6">项目ID</TableHead>
-                      <TableHead class="px-6">状态</TableHead>
-                      <TableHead class="px-6">申请时间</TableHead>
-                      <TableHead class="px-6 text-right">操作</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    <TableRow v-for="r in permissionRequests" :key="r.id">
-                      <TableCell class="px-6 py-4">@{{ r.userId }}</TableCell>
-                      <TableCell class="px-6 py-4">{{ r.requestType }}</TableCell>
-                      <TableCell class="px-6 py-4">{{ r.projectId ?? '-' }}</TableCell>
-                      <TableCell class="px-6 py-4">{{ r.status }}</TableCell>
-                      <TableCell class="px-6 py-4 text-gray-500 text-sm">{{ r.createdAt }}</TableCell>
-                      <TableCell class="text-right px-6 py-4 whitespace-nowrap">
-                        <div class="flex justify-end gap-3">
-                          <Button variant="secondary" size="sm" @click="approvePermission(r.id)" :disabled="r.status !== 'pending'">通过</Button>
-                          <Button variant="outline" size="sm" class="text-red-600 hover:text-red-700 hover:bg-red-50" @click="rejectPermission(r.id)" :disabled="r.status !== 'pending'">拒绝</Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  </TableBody>
-                </Table>
+              <div v-if="permissionRequests.length === 0" class="flex flex-col items-center justify-center py-12 text-sm text-muted-foreground">
+                暂无权限申请
               </div>
+              <div class="relative w-full overflow-auto rounded-lg border border-gray-100 bg-white shadow-sm" v-else>
+                <table class="w-full caption-bottom text-sm border-collapse">
+                    <thead class="bg-gray-50 border-b">
+                      <tr class="transition-colors hover:bg-muted/50">
+                        <th class="h-12 px-6 text-left align-middle font-medium text-muted-foreground">申请人</th>
+                        <th class="h-12 px-6 text-left align-middle font-medium text-muted-foreground">类型</th>
+                        <th class="h-12 px-6 text-left align-middle font-medium text-muted-foreground">项目ID</th>
+                        <th class="h-12 px-6 text-left align-middle font-medium text-muted-foreground">项目名称</th>
+                        <th class="h-12 px-6 text-left align-middle font-medium text-muted-foreground">状态</th>
+                        <th class="h-12 px-6 text-left align-middle font-medium text-muted-foreground">申请时间</th>
+                        <th class="h-12 px-6 text-right align-middle font-medium text-muted-foreground">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody class="[&_tr:last-child]:border-0">
+                      <tr v-for="r in permissionRequests" :key="r.id" class="border-b transition-colors hover:bg-muted/50">
+                        <td class="p-6 align-middle font-medium">@{{ r.username || r.userId }}</td>
+                        <td class="p-6 align-middle">
+                          <Badge variant="outline" :class="[
+                            r.requestType === 'JOIN_PROJECT' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-purple-50 text-purple-700 border-purple-200'
+                          ] as any">
+                            {{ r.requestType === 'JOIN_PROJECT' ? '加入项目' : '申请管理员' }}
+                          </Badge>
+                        </td>
+                        <td class="p-6 align-middle font-mono text-gray-600">{{ r.projectId ? `#${r.projectId}` : '-' }}</td>
+                        <td class="p-6 align-middle font-medium">{{ r.projectName || '-' }}</td>
+                        <td class="p-6 align-middle">
+                          <Badge variant="outline" :class="[
+                            r.status === 'pending' ? 'bg-yellow-50 text-yellow-700 border-yellow-200' : '',
+                            r.status === 'approved' ? 'bg-green-50 text-green-700 border-green-200' : '',
+                            r.status === 'rejected' ? 'bg-red-50 text-red-700 border-red-200' : ''
+                          ] as any">
+                            {{ r.status === 'pending' ? '待审核' : (r.status === 'approved' ? '已通过' : '已拒绝') }}
+                          </Badge>
+                        </td>
+                        <td class="p-6 align-middle text-gray-500 text-sm">{{ new Date(r.createdAt).toLocaleString() }}</td>
+                        <td class="p-6 align-middle text-right whitespace-nowrap">
+                          <div class="flex justify-end gap-3">
+                            <Button variant="secondary" size="sm" @click="approvePermission(r.id)" :disabled="r.status !== 'pending'">通过</Button>
+                            <Button variant="outline" size="sm" class="text-red-600 hover:text-red-700 hover:bg-red-50" @click="rejectPermission(r.id)" :disabled="r.status !== 'pending'">拒绝</Button>
+                          </div>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
             </CardContent>
           </Card>
 
-          <Card class="flex flex-col border-l-4 border-purple-500">
+          <Card class="flex flex-col border-l-4 border-purple-500 h-full">
             <CardHeader class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div class="space-y-1.5">
                 <CardTitle class="flex items-center gap-2">
@@ -810,6 +939,7 @@ fetchArchivedProjects()
                       <tr class="transition-colors hover:bg-muted/50">
                         <th class="h-12 px-6 text-left align-middle font-medium text-muted-foreground w-[200px]">团队名称</th>
                         <th class="h-12 px-6 text-left align-middle font-medium text-muted-foreground">描述</th>
+                        <th class="h-12 px-6 text-left align-middle font-medium text-muted-foreground w-[120px]">我的角色</th>
                         <th class="h-12 px-6 text-right align-middle font-medium text-muted-foreground w-[200px]">操作</th>
                       </tr>
                     </thead>
@@ -817,10 +947,15 @@ fetchArchivedProjects()
                       <tr v-for="team in teams" :key="team.id" class="border-b transition-colors hover:bg-muted/50">
                         <td class="p-6 align-middle font-medium whitespace-nowrap truncate max-w-[200px]" :title="team.name">{{ team.name }}</td>
                         <td class="p-6 align-middle text-gray-700 break-words whitespace-normal" :title="team.description || ''">{{ team.description || '-' }}</td>
+                        <td class="p-6 align-middle whitespace-nowrap">
+                          <span :class="String(team.role || '').toLowerCase() === 'admin' ? 'text-green-700' : String(team.role || '').toLowerCase() === 'member' ? 'text-gray-700' : 'text-gray-400'">
+                            {{ String(team.role || '').toLowerCase() === 'admin' ? '管理员' : String(team.role || '').toLowerCase() === 'member' ? '成员' : '-' }}
+                          </span>
+                        </td>
                         <td class="p-6 align-middle text-right whitespace-nowrap">
                           <div class="flex justify-end gap-3">
                             <Button variant="outline" size="sm" @click="openTeamSettings(team)">成员管理</Button>
-                            <Button variant="ghost" size="sm" class="text-red-600 hover:text-red-700 hover:bg-red-50" @click="handleDeleteTeam(team.id)">
+                            <Button v-if="String(userStore.user?.role || '').toLowerCase() === 'admin'" variant="ghost" size="sm" class="text-red-600 hover:text-red-700 hover:bg-red-50" @click="handleDeleteTeam(team.id)">
                               删除
                             </Button>
                           </div>
@@ -832,7 +967,7 @@ fetchArchivedProjects()
             </CardContent>
           </Card>
 
-          <Card class="flex flex-col border-l-4 border-teal-500">
+          <Card class="flex flex-col border-l-4 border-teal-500 h-full">
             <CardHeader class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div class="space-y-1.5">
                 <CardTitle class="flex items-center gap-2">
@@ -872,8 +1007,8 @@ fetchArchivedProjects()
                         <td class="p-6 align-middle whitespace-nowrap truncate max-w-[150px]" :title="getTeamName(p.teamId)">{{ getTeamName(p.teamId) }}</td>
                         <td class="p-6 align-middle text-gray-500 text-sm whitespace-nowrap">{{ p.createdAt ? new Date(p.createdAt).toLocaleDateString() : '-' }}</td>
                         <td class="p-6 align-middle text-right whitespace-nowrap">
-                          <Button variant="ghost" size="sm" class="text-red-600 hover:text-red-700 hover:bg-red-50" @click="handleDeleteProject(p.id)">
-                            删除
+                          <Button v-if="canArchiveProject(p)" variant="ghost" size="sm" class="text-red-600 hover:text-red-700 hover:bg-red-50" @click="handleDeleteProject(p.id)">
+                            归档
                           </Button>
                         </td>
                       </tr>
@@ -883,46 +1018,58 @@ fetchArchivedProjects()
             </CardContent>
           </Card>
 
-          <Card class="flex flex-col border-l-4 border-amber-500">
-            <CardHeader class="flex flex-row items-center justify-between">
+          <Card class="flex flex-col border-l-4 border-amber-500 h-full">
+            <CardHeader class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div class="space-y-1.5">
                 <CardTitle class="flex items-center gap-2">
                   <span class="inline-flex h-8 w-8 items-center justify-center rounded-md bg-amber-50 text-amber-600 ring-1 ring-amber-100">
                     <ArchiveRestore class="h-4 w-4" />
                   </span>
                   已归档项目
+                  <Badge variant="outline" class="border-amber-100 bg-amber-50 text-amber-700">总数 {{ archivedProjects.length }}</Badge>
                 </CardTitle>
                 <CardDescription>查看与恢复已归档项目（软删除）</CardDescription>
               </div>
               <Button variant="outline" size="sm" @click="fetchArchivedProjects">刷新</Button>
             </CardHeader>
-            <CardContent>
-              <div class="rounded-lg border border-gray-100 bg-white overflow-hidden shadow-sm">
-                <Table>
-                  <TableHeader class="bg-gray-50">
-                    <TableRow class="bg-gray-50 hover:bg-gray-50">
-                      <TableHead class="px-6">项目名称</TableHead>
-                      <TableHead class="px-6">归属团队</TableHead>
-                      <TableHead class="px-6">状态</TableHead>
-                      <TableHead class="px-6 text-right">操作</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    <TableRow v-for="p in archivedProjects" :key="p.id">
-                      <TableCell class="px-6 py-4 font-medium whitespace-nowrap">{{ p.name }}</TableCell>
-                      <TableCell class="px-6 py-4 whitespace-nowrap">{{ getTeamName(p.teamId) }}</TableCell>
-                      <TableCell class="px-6 py-4 text-muted-foreground">已归档</TableCell>
-                      <TableCell class="text-right px-6 py-4 whitespace-nowrap">
+            <CardContent class="flex-1 space-y-4">
+              <div v-if="archivedProjects.length === 0" class="flex flex-col items-center justify-center py-12 text-sm text-muted-foreground">
+                暂无归档项目
+              </div>
+              <div class="relative w-full overflow-auto rounded-lg border border-gray-100 bg-white shadow-sm" v-else>
+                <table class="w-full caption-bottom text-sm border-collapse">
+                  <thead class="bg-gray-50 border-b">
+                    <tr class="transition-colors hover:bg-muted/50">
+                      <th class="h-12 px-6 text-left align-middle font-medium text-muted-foreground w-[150px]">项目名称</th>
+                      <th class="h-12 px-6 text-left align-middle font-medium text-muted-foreground">归属团队</th>
+                      <th class="h-12 px-6 text-left align-middle font-medium text-muted-foreground w-[100px]">状态</th>
+                      <th class="h-12 px-6 text-right align-middle font-medium text-muted-foreground w-[100px]">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody class="[&_tr:last-child]:border-0">
+                    <tr v-for="p in archivedProjects" :key="p.id" class="border-b transition-colors hover:bg-muted/50">
+                      <td class="p-6 align-middle font-medium whitespace-nowrap truncate max-w-[150px]" :title="p.name">{{ p.name }}</td>
+                      <td class="p-6 align-middle whitespace-nowrap truncate max-w-[150px]" :title="getTeamName(p.teamId)">{{ getTeamName(p.teamId) }}</td>
+                      <td class="p-6 align-middle text-muted-foreground">
+                        <Badge variant="secondary" class="bg-gray-100 text-gray-600 border-gray-200">已归档</Badge>
+                      </td>
+                      <td class="p-6 align-middle text-right whitespace-nowrap">
                         <div class="flex justify-end gap-3">
-                          <Button variant="secondary" size="sm" @click="handleRestoreProject(p.id!)">恢复</Button>
+                          <Button variant="outline" size="sm" class="text-amber-600 hover:text-amber-700 hover:bg-amber-50 border-amber-200" @click="handleRestoreProject(p.id!)">恢复</Button>
+                          <Button
+                            v-if="isSystemAdmin"
+                            variant="outline"
+                            size="sm"
+                            class="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+                            @click="handlePurgeProject(p)"
+                          >
+                            彻底删除
+                          </Button>
                         </div>
-                      </TableCell>
-                    </TableRow>
-                    <TableRow v-if="archivedProjects.length === 0">
-                      <TableCell colspan="4" class="text-center text-gray-500 py-8">暂无归档项目</TableCell>
-                    </TableRow>
-                  </TableBody>
-                </Table>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
             </CardContent>
           </Card>
@@ -1129,4 +1276,20 @@ fetchArchivedProjects()
       </div>
     </div>
   </div>
+  
+  <Dialog v-model:open="nameConfirm.open">
+    <DialogContent class="sm:max-w-[420px]">
+      <DialogHeader>
+        <DialogTitle>{{ nameConfirm.title }}</DialogTitle>
+        <DialogDescription>{{ nameConfirm.message }}</DialogDescription>
+      </DialogHeader>
+      <div class="space-y-4">
+        <Input v-model="nameConfirm.value" :placeholder="nameConfirm.placeholder || ''" />
+        <div class="flex justify-end gap-3">
+          <Button variant="outline" @click="confirmInputCancel">{{ nameConfirm.cancelText }}</Button>
+          <Button variant="destructive" @click="confirmInputOk">{{ nameConfirm.confirmText }}</Button>
+        </div>
+      </div>
+    </DialogContent>
+  </Dialog>
 </template>

@@ -150,7 +150,17 @@ const fetchReports = async (skipDateValidation = false) => {
                 const caseType = String(caseTypeRaw || '').toUpperCase()
                 const executedAt = r.executedAt || r.executed_at || (caseInfo && caseInfo.lastRun) || r.lastRun || ''
                 const executedBy = r.executedBy || r.executed_by || 'System'
-                const source = r.triggerType || (r.planId ? 'schedule' : 'manual')
+         // Map source
+    let source = r.triggerType
+    if (!source) {
+      if (r.executedBy === 'System') {
+        source = 'schedule'
+      } else if (r.executedBy === 'Project API Key' || r.executedBy === 'OpenAPI') {
+        source = 'openapi'
+      } else {
+        source = 'manual'
+      }
+    }
                 const webhookStatus = r.webhookStatus || 'none'
 
                 return {
@@ -259,6 +269,17 @@ watch(currentPage, () => {
     fetchReports()
 })
 
+watch(() => route.query, (newQuery) => {
+    const k = newQuery.keyword as string | undefined
+    const s = newQuery.status as string | undefined
+    const d = newQuery.date as string | undefined
+    keyword.value = k || ''
+    statusFilter.value = s || 'all'
+    dateFilter.value = d || ''
+    currentPage.value = 1
+    fetchReports()
+}, { deep: true })
+
 onMounted(() => {
     const k = route.query.keyword as string | undefined
     const s = route.query.status as string | undefined
@@ -324,7 +345,7 @@ const getStatusIcon = (status: string) => {
 }
 
 const handleViewReport = (id: string) => {
-    router.push(`/reports/${id}`)
+    router.push({ path: `/reports/${id}`, query: { from: 'reports' } })
 }
 
 const getCaseTypeBadgeClass = (type: string) => {

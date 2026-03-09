@@ -2,8 +2,12 @@
 // 导出测试报告为独立的 HTML 文件
 // 包含内联的 Vue 3 应用和所有必要的样式/脚本
 export const generateReportHtml = (data: any) => {
+  if (!data) return '';
   const { planSummary } = data;
 
+  // 深度检查 planSummary 是否有效
+  const summary = planSummary || { planName: '测试报告' };
+  
   // 将数据序列化为 JSON 字符串，以便嵌入到 HTML 中
   const reportDataJson = JSON.stringify(data).replace(/</g, '\\u003c');
 
@@ -13,7 +17,7 @@ export const generateReportHtml = (data: any) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>测试报告 - ${planSummary?.planName || '测试报告'}</title>
+  <title>测试报告 - ${summary.planName || '测试报告'}</title>
   <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>

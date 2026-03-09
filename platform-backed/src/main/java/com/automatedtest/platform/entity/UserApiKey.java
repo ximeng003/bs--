@@ -33,4 +33,11 @@ public class UserApiKey implements Serializable {
 
     @TableField(value = "updated_at", fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updatedAt;
+    
+    public Integer getStatus() { return status; }
+    public void setStatus(Integer status) { this.status = status; }
+    public void setAccessKey(String accessKey) { this.accessKey = accessKey; }
+    public Long getUserId() { return userId; }
+    public void setLastUsedAt(LocalDateTime lastUsedAt) { this.lastUsedAt = lastUsedAt; }
+    public String getName() { return name; }
 }

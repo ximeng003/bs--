@@ -24,7 +24,7 @@ interface TestCase {
   environment: string;
   status: 'active' | 'inactive';
   lastRun?: string;
-  lastResult?: 'success' | 'failed' | 'pending';
+  lastResult?: 'success' | 'failed' | 'pending' | 'running';
   createdAt?: string;
   updatedAt?: string;
 }
@@ -57,17 +57,11 @@ const lastRunEnv = ref<string>('')
 const lastRunDurationMs = ref<number | null>(null)
 const isLogFullscreen = ref(false)
 const logSearch = ref('')
-const filteredLog = computed(() => {
-  const raw = logDialogDetail.value || ''
-  const kw = (logSearch.value || '').trim()
-  if (!kw) return raw
-  const lines = raw.split(/\r?\n/)
-  return lines.filter(l => l.toLowerCase().includes(kw.toLowerCase())).join('\n')
-})
 const stepsOnly = ref(false)
 const coloredLogLines = computed(() => {
   const txt = (logDialogDetail.value || '').toString()
   const lines = txt.split(/\r?\n/)
+  const kw = (logSearch.value || '').trim().toLowerCase()
   const out: { text: string; level: 'error'|'warn'|'assert'|'info'; visible: boolean }[] = []
   for (const line of lines) {
     if (!line) continue
@@ -77,7 +71,9 @@ const coloredLogLines = computed(() => {
     else if (/\b(warn|重试|slow)/i.test(line) || lower.includes('[warn]')) level = 'warn'
     else if (/\b(assert|断言)/i.test(line) || lower.includes('[assert]')) level = 'assert'
     const isStep = /步骤\s*\d+/.test(line) || /\b(断言|assert)\b/i.test(line)
-    out.push({ text: line, level, visible: stepsOnly.value ? isStep : true })
+    const matchesSearch = !kw || lower.includes(kw)
+    const isVisible = (stepsOnly.value ? isStep : true) && matchesSearch
+    out.push({ text: line, level, visible: isVisible })
   }
   return out
 })
@@ -397,6 +393,34 @@ const fetchEnvOptions = async () => {
     envOptions.value = []
   }
 }
+// DDT Dialog
+const ddtDialogOpen = ref(false)
+const ddtCaseId = ref<string | null>(null)
+const ddtCsv = ref('username,password\nuser1,pass1\nuser2,pass2')
+const ddtConcurrency = ref('2')
+const openDdtDialog = (id: string) => {
+  ddtCaseId.value = id
+  ddtDialogOpen.value = true
+}
+const submitDdt = async () => {
+  if (!ddtCaseId.value) return
+  try {
+    const res: any = await request.post(`/testcases/${ddtCaseId.value}/execute-batch`, {
+      csv: ddtCsv.value,
+      concurrency: Number(ddtConcurrency.value || '1')
+    })
+    showToast('批量执行已提交', 'success')
+    ddtDialogOpen.value = false
+    // Optionally present summary
+    logDialogTitle.value = '批量执行摘要'
+    logDialogMessage.value = ''
+    logDialogDetail.value = JSON.stringify(res, null, 2)
+    logDialogOpen.value = true
+    await fetchTestCases()
+  } catch (e: any) {
+    showToast(e?.message || '批量执行失败', 'error')
+  }
+}
 
 onMounted(() => {
   fetchTestCases()
@@ -452,6 +476,7 @@ const getResultBadgeColor = (result?: string) => {
     case 'success': return 'bg-green-500 hover:bg-green-600'
     case 'failed': return 'bg-red-500 hover:bg-red-600'
     case 'pending': return 'bg-yellow-500 hover:bg-yellow-600'
+    case 'running': return 'bg-blue-500 hover:bg-blue-600'
     default: return ''
   }
 }
@@ -461,6 +486,7 @@ const getResultText = (result?: string) => {
     case 'success': return '成功'
     case 'failed': return '失败'
     case 'pending': return '待执行'
+    case 'running': return '运行中'
     default: return '未运行'
   }
 }
@@ -558,6 +584,37 @@ const getTypeBadgeClass = (type: string) => {
               查看详情报告
             </Button>
             <Button @click="logDialogOpen = false">关闭</Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+    <!-- DDT Dialog -->
+    <Dialog v-model:open="ddtDialogOpen">
+      <DialogContent class="sm:max-w-[520px]">
+        <DialogHeader>
+          <DialogTitle>批量执行（CSV）</DialogTitle>
+          <DialogDescription>将首行作为列名，后续行作为变量行进行批量执行</DialogDescription>
+        </DialogHeader>
+        <div class="space-y-3">
+          <Label>CSV 数据</Label>
+          <Textarea v-model="ddtCsv" rows="8" placeholder="username,password&#10;u1,p1&#10;u2,p2" />
+          <div class="flex items-center gap-2">
+            <Label>并发</Label>
+            <Select v-model="ddtConcurrency">
+              <SelectTrigger class="w-[100px]">
+                <SelectValue placeholder="并发" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="1">1</SelectItem>
+                <SelectItem value="2">2</SelectItem>
+                <SelectItem value="3">3</SelectItem>
+                <SelectItem value="5">5</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div class="flex justify-end gap-2">
+            <Button variant="outline" @click="ddtDialogOpen = false">取消</Button>
+            <Button class="bg-amber-600 hover:bg-amber-700" @click="submitDdt">开始批量执行</Button>
           </div>
         </div>
       </DialogContent>
@@ -723,10 +780,13 @@ const getTypeBadgeClass = (type: string) => {
                 size="icon" 
                 class="text-green-600 hover:text-green-700 hover:bg-green-50" 
                 @click="handleRun(testCase.id)"
-                :disabled="executingCaseId === testCase.id"
+                :disabled="executingCaseId === testCase.id || testCase.lastResult === 'running'"
               >
-                <Loader2 v-if="executingCaseId === testCase.id" class="w-4 h-4 animate-spin" />
+                <Loader2 v-if="executingCaseId === testCase.id || testCase.lastResult === 'running'" class="w-4 h-4 animate-spin" />
                 <Play v-else class="w-4 h-4" />
+              </Button>
+              <Button variant="ghost" size="sm" class="text-amber-600 hover:text-amber-700 hover:bg-amber-50" @click="openDdtDialog(testCase.id)">
+                批量执行
               </Button>
               <Button variant="ghost" size="icon" class="text-blue-600 hover:text-blue-700 hover:bg-blue-50" @click="handleEdit(testCase.id)">
                 <Pencil class="w-4 h-4" />

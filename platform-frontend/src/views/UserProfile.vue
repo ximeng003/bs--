@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -322,31 +322,70 @@ const copyToClipboard = (text: string) => {
   })
 }
 
-onMounted(() => {
-  fetchProfile()
-  fetchLogs()
-  fetchVariables()
-  loadApiKeys()
-})
-
 // Permission Requests
 const applyForm = ref({
   requestType: 'JOIN_PROJECT' as 'JOIN_PROJECT' | 'UPGRADE_ROLE',
   projectId: null as number | null,
   description: ''
 })
+
+const availableProjects = ref<any[]>([])
+const searchKeyword = ref('')
+const searching = ref(false)
+
+const fetchAvailableProjects = async () => {
+  searching.value = true
+  try {
+    const res: any = await request.get('/projects/search-available', {
+      params: { keyword: searchKeyword.value }
+    })
+    availableProjects.value = Array.isArray(res) ? res : []
+  } catch (e) {
+    console.error('Failed to fetch available projects', e)
+    availableProjects.value = []
+  } finally {
+    searching.value = false
+  }
+}
+
+// Debounced search
+let searchTimer: any = null
+const handleSearch = () => {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    fetchAvailableProjects()
+  }, 300)
+}
+
+const joinableProjects = computed(() => {
+  // Backend already filters, but we can group by Team here if needed
+  // For now just return the list, the backend handles the heavy lifting
+  return availableProjects.value
+})
+
+const upgradeableProjects = computed(() => {
+  // Only show projects where user is member but not admin? 
+  // Backend logic might check this, but frontend can filter too.
+  // Assuming projectStore has role info. If not, we might need to rely on backend validation.
+  // But based on previous code, projectStore seems to have role.
+  return projectStore.projectList.filter(p => p.role !== 'admin')
+})
+
+onMounted(() => {
+  fetchProfile()
+  fetchLogs()
+  fetchVariables()
+  fetchAvailableProjects()
+  loadApiKeys()
+})
+
 const submitting = ref(false)
 const submitPermissionRequest = async () => {
-  if (applyForm.value.requestType === 'JOIN_PROJECT') {
-    if (!applyForm.value.projectId) {
-      const pid = projectStore.currentProject?.id
-      if (!pid) {
-        showToast('请选择项目或先在左侧选择当前项目', 'error')
-        return
-      }
-      applyForm.value.projectId = pid
-    }
+  if (!applyForm.value.projectId) {
+    showToast('请选择项目', 'error')
+    return
   }
+  
   try {
     submitting.value = true
     await request.post('/permission-requests', {
@@ -356,6 +395,10 @@ const submitPermissionRequest = async () => {
     })
     showToast('申请已提交，等待管理员审批', 'success')
     applyForm.value = { requestType: 'JOIN_PROJECT', projectId: null, description: '' }
+    // Refresh list to remove the applied project
+    if (searchKeyword.value) {
+      fetchAvailableProjects()
+    }
   } catch (e: any) {
     showToast(e.message || '提交失败', 'error')
   } finally {
@@ -477,11 +520,54 @@ const submitPermissionRequest = async () => {
                 </select>
               </div>
               <div class="space-y-2" v-if="applyForm.requestType === 'JOIN_PROJECT'">
-                <Label>项目</Label>
+                <Label>搜索并选择项目</Label>
+                <div class="space-y-2">
+                  <div class="relative" v-if="!applyForm.projectId">
+                    <Input 
+                      v-model="searchKeyword" 
+                      placeholder="输入项目名搜索..." 
+                      @input="handleSearch"
+                    />
+                    <div v-if="searching" class="absolute right-3 top-2.5">
+                      <span class="w-4 h-4 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin"></span>
+                    </div>
+                  </div>
+                <div class="border rounded-md max-h-60 overflow-y-auto bg-white p-1 shadow-sm" v-if="!applyForm.projectId">
+                    <div v-if="joinableProjects.length === 0" class="text-sm text-gray-500 p-4 text-center">
+                      {{ searching ? '搜索中...' : '暂无更多可加入的项目' }}
+                    </div>
+                    <template v-else>
+                      <div 
+                        v-for="p in joinableProjects" 
+                        :key="p.id" 
+                        class="group flex flex-col p-2.5 hover:bg-gray-50 cursor-pointer rounded-md transition-all border border-transparent"
+                        :class="applyForm.projectId === p.id ? 'bg-blue-50 border-blue-200 shadow-sm' : ''"
+                        @click="applyForm.projectId = p.id"
+                      >
+                        <div class="flex justify-between items-center mb-1">
+                          <span class="font-medium text-gray-900 group-hover:text-blue-700 transition-colors">{{ p.name }}</span>
+                          <span class="text-[10px] text-gray-400 font-mono bg-gray-100 px-1.5 py-0.5 rounded">ID: {{ p.id }}</span>
+                        </div>
+                        <div class="text-xs text-gray-500 flex items-center gap-2">
+                          <span class="bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">团队: {{ p.teamName }}</span>
+                          <span v-if="p.description" class="truncate max-w-[150px] opacity-70" :title="p.description">{{ p.description }}</span>
+                        </div>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+                <div v-if="applyForm.projectId" class="text-xs text-blue-600 mt-1 font-medium bg-blue-50 p-2 rounded border border-blue-100 flex justify-between items-center">
+                  <span>已选择: {{ joinableProjects.find(p => p.id === applyForm.projectId)?.name }}</span>
+                  <button class="text-blue-400 hover:text-blue-600" @click="applyForm.projectId = null">重选</button>
+                </div>
+              </div>
+              <div class="space-y-2" v-if="applyForm.requestType === 'UPGRADE_ROLE'">
+                <Label>选择当前项目</Label>
                 <select v-model="applyForm.projectId" class="h-9 px-3 rounded-md border border-input bg-background text-sm">
-                  <option :value="null">使用左侧当前项目</option>
-                  <option v-for="p in projectStore.projectList" :key="p.id" :value="p.id">#{{ p.id }} - {{ p.name }}</option>
+                  <option :value="null" disabled>请选择项目</option>
+                  <option v-for="p in upgradeableProjects" :key="p.id" :value="p.id">#{{ p.id }} - {{ p.name }} ({{ p.role === 'admin' ? '管理员' : '成员' }})</option>
                 </select>
+                <p v-if="upgradeableProjects.length === 0" class="text-xs text-gray-500 mt-1">暂无需要升级权限的项目</p>
               </div>
             </div>
             <div class="space-y-2">

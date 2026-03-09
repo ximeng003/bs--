@@ -25,7 +25,8 @@ const form = ref({
   scheduleEnabled: false,
   cronExpression: '',
   apiId: '',
-  allowOpenApi: false
+  allowOpenApi: false,
+  flowJson: ''
 })
 
 const testCases = ref<any[]>([])
@@ -65,6 +66,7 @@ const resetFormFromPlan = () => {
     form.value.cronExpression = props.plan.cronExpression || ''
     form.value.apiId = props.plan.apiId || (props.plan.id ? `PLAN_${props.plan.id}` : '')
     form.value.allowOpenApi = !!props.plan.allowOpenApi
+    form.value.flowJson = props.plan.flowJson || ''
     const rawIds = props.plan.testCaseIds || props.plan.test_case_ids || ''
     if (rawIds) {
       form.value.testCaseIds = String(rawIds)
@@ -83,6 +85,7 @@ const resetFormFromPlan = () => {
     form.value.cronExpression = ''
     form.value.apiId = `PLAN_${Date.now().toString().slice(-4)}`
     form.value.allowOpenApi = false
+    form.value.flowJson = ''
   }
 }
 
@@ -115,6 +118,7 @@ const handleSubmit = async () => {
     cronExpression: form.value.scheduleEnabled ? form.value.cronExpression : null,
     apiId: form.value.apiId,
     allowOpenApi: form.value.allowOpenApi,
+    flowJson: form.value.flowJson,
     status: props.plan?.status || 'active'
   }
 
@@ -168,10 +172,33 @@ const handleSubmit = async () => {
         <div class="space-y-2 max-h-48 overflow-y-auto">
           <label v-for="tc in testCases" :key="tc.id" class="flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer">
             <input type="checkbox" :value="tc.id" v-model="form.testCaseIds" class="rounded" />
-            <span class="text-sm">{{ tc.name }} ({{ tc.type }})</span>
+            <span class="text-xs px-1.5 py-0.5 rounded"
+                  :class="tc.type==='API' ? 'bg-green-100 text-green-700' : tc.type==='WEB' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'">
+              [{{ tc.type }}]
+            </span>
+            <span class="text-sm">{{ tc.name }}</span>
           </label>
           <div v-if="testCases.length === 0" class="text-sm text-gray-400 text-center">
             暂无测试用例，请先创建用例
+          </div>
+        </div>
+      </Card>
+    </div>
+    
+    <div v-if="form.testCaseIds.length" class="space-y-2">
+      <Label>执行顺序</Label>
+      <Card class="p-4">
+        <div class="space-y-2">
+          <div v-for="(id, idx) in form.testCaseIds" :key="id" class="flex items-center gap-2">
+            <span class="w-6 text-sm text-gray-500">{{ idx + 1 }}</span>
+            <span class="text-xs px-1.5 py-0.5 rounded"
+                  :class="(testCases.find(t => String(t.id) === String(id)) || {}).type==='API' ? 'bg-green-100 text-green-700' : (testCases.find(t => String(t.id) === String(id)) || {}).type==='WEB' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'">
+              [{{ (testCases.find(t => String(t.id) === String(id)) || {}).type || '未知' }}]
+            </span>
+            <span class="flex-1 text-sm">{{ (testCases.find(t => String(t.id) === String(id)) || {}).name || ('用例 ' + id) }}</span>
+            <Button variant="outline" size="sm" @click="idx>0 && ([form.testCaseIds[idx-1], form.testCaseIds[idx]] = [form.testCaseIds[idx], form.testCaseIds[idx-1]])">上移</Button>
+            <Button variant="outline" size="sm" @click="idx<form.testCaseIds.length-1 && ([form.testCaseIds[idx+1], form.testCaseIds[idx]] = [form.testCaseIds[idx], form.testCaseIds[idx+1]])">下移</Button>
+            <Button variant="destructive" size="sm" @click="form.testCaseIds.splice(idx,1)">移除</Button>
           </div>
         </div>
       </Card>
@@ -219,6 +246,11 @@ const handleSubmit = async () => {
           用于 API 调用时的唯一标识，建议使用大写字母和下划线
         </p>
       </div>
+    </div>
+    
+    <div class="space-y-2">
+      <Label>流程编排（高级，JSON）</Label>
+      <Textarea v-model="form.flowJson" :rows="6" placeholder='例如: [{"type":"RUN","caseId":19},{"type":"IF","condition":{"varNotEmpty":"token"},"then":[{"type":"RUN","caseId":18}]}]'></Textarea>
     </div>
 
     <div class="space-y-2">

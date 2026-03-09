@@ -16,3 +16,7 @@ mybatis-plus:
   configuration:
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
     map-underscore-to-camel-case: true
+
+jwt:
+  secret: automated-testing-platform-secure-fixed-secret-key-999
+  exp_hours: 72

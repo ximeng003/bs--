@@ -36,6 +36,7 @@ interface TestPlan {
 
 const router = useRouter()
 const testPlans = ref<TestPlan[]>([])
+const concurrencyMap = ref<Record<string, string>>({})
 const isCreateDialogOpen = ref(false)
 const isEditDialogOpen = ref(false)
 const editingPlan = ref<TestPlan | null>(null)
@@ -57,9 +58,16 @@ const fetchTestPlans = async () => {
     if (res && res.records) {
       totalCount.value = typeof res.total === 'number' ? res.total : res.records.length
       testPlans.value = res.records
+      // Initialize concurrency defaults
+      testPlans.value.forEach(p => {
+        if (!concurrencyMap.value[p.id]) concurrencyMap.value[p.id] = '1'
+      })
     } else if (Array.isArray(res)) {
       totalCount.value = res.length
       testPlans.value = res
+      testPlans.value.forEach(p => {
+        if (!concurrencyMap.value[p.id]) concurrencyMap.value[p.id] = '1'
+      })
     } else {
       totalCount.value = 0
       testPlans.value = []
@@ -143,7 +151,8 @@ const handleExecute = async (id: string) => {
   const planName = plan?.name || id
   showToast('开始执行计划 ' + planName, 'info')
   try {
-    const res: any = await request.post(`/plans/${id}/execute`)
+    const c = Number(concurrencyMap.value[id] || '1')
+    const res: any = await request.post(`/plans/${id}/execute`, null, { params: { concurrency: c } })
     const nowStr = new Date().toLocaleString('zh-CN', { hour12: false })
     if (plan) {
       plan.lastRun = nowStr
@@ -281,6 +290,13 @@ const selectedKey = ref(apiKeys.value.length > 0 ? apiKeys.value[0].key : 'sk_te
 const selectedKeyName = ref(apiKeys.value.length > 0 ? apiKeys.value[0].name : 'Default Key')
 const selectedPlanId = ref('PLAN_1001')
 const selectedPlanName = ref('示例计划')
+const getSelectedPlanConcurrency = () => {
+  const plan = testPlans.value.find(p => p.apiId === selectedPlanId.value || p.id === selectedPlanId.value)
+  if (!plan) return 1
+  const val = concurrencyMap.value[plan.id]
+  const num = Number(val || '1')
+  return isNaN(num) ? 1 : num
+}
 
 // Auto-select first available plan with API ID
 watch(testPlans, (plans) => {
@@ -334,7 +350,8 @@ const copyToClipboard = async (text: string) => {
 }
 
 const getOpenApiCurl = () => {
-  return `curl -X POST http://localhost:18080/api/plans/${selectedPlanId.value}/execute \\
+  const c = getSelectedPlanConcurrency()
+  return `curl -X POST http://localhost:18080/api/openapi/plans/${selectedPlanId.value}/execute?concurrency=${c} \\
   -H 'X-API-KEY: ${selectedKey.value}' \\
   -H 'Content-Type: application/json'`
 }
@@ -466,7 +483,7 @@ const getJenkinsPipeline = () => {
               </div>
               <div class="font-mono text-xs leading-relaxed">
                 <div class="text-purple-400"># 立即执行测试计划 ({{ selectedPlanName }})</div>
-                <div class="text-yellow-400">curl</div> <span class="text-gray-300">-X POST</span> <span class="text-green-400">http://localhost:18080/api/plans/{{ selectedPlanId }}/execute</span> \
+                <div class="text-yellow-400">curl</div> <span class="text-gray-300">-X POST</span> <span class="text-green-400">http://localhost:18080/api/openapi/plans/{{ selectedPlanId }}/execute?concurrency={{ getSelectedPlanConcurrency() }}</span> \
                 <div class="pl-4"><span class="text-gray-300">-H</span> <span class="text-green-400">"X-API-KEY: <span class="text-white font-bold">{{ selectedKey }}</span>"</span> \</div>
                 <div class="pl-4"><span class="text-gray-300">-H</span> <span class="text-green-400">"Content-Type: application/json"</span></div>
               </div>
@@ -484,7 +501,7 @@ const getJenkinsPipeline = () => {
                 <div class="text-blue-400">pipeline</div> {
                 <div class="pl-4"><span class="text-blue-400">stage</span>(<span class="text-green-400">'Run Tests'</span>) {</div>
                 <div class="pl-8"><span class="text-blue-400">steps</span> {</div>
-                <div class="pl-12"><span class="text-yellow-400">sh</span> <span class="text-green-400">"curl -X POST http://localhost:18080/api/plans/{{ selectedPlanId }}/execute \</span></div>
+                <div class="pl-12"><span class="text-yellow-400">sh</span> <span class="text-green-400">"curl -X POST http://localhost:18080/api/openapi/plans/{{ selectedPlanId }}/execute \</span></div>
                 <div class="pl-16"><span class="text-green-400">-H 'X-API-KEY: <span class="text-white font-bold">{{ selectedKey }}</span>'"</span></div>
                 <div class="pl-8">}</div>
                 <div class="pl-4">}</div>
@@ -603,6 +620,21 @@ const getJenkinsPipeline = () => {
                 </div>
 
                 <div class="flex items-center gap-2">
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-gray-500">并发</span>
+                <Select v-model="concurrencyMap[plan.id]">
+                  <SelectTrigger class="w-[90px] h-8">
+                    <SelectValue placeholder="并发" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1">1</SelectItem>
+                    <SelectItem value="2">2</SelectItem>
+                    <SelectItem value="3">3</SelectItem>
+                    <SelectItem value="5">5</SelectItem>
+                    <SelectItem value="8">8</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
                   <Button size="sm" class="bg-green-600 hover:bg-green-700" @click="handleExecute(plan.id)">
                     <Play class="w-4 h-4 mr-2" />
                     执行

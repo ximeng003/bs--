@@ -56,4 +56,17 @@ public class TestCase implements Serializable {
 
     @TableField(value = "updated_at", fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updatedAt;
+    
+    public String getContent() { return content; }
+    public Integer getProjectId() { return projectId; }
+    public String getEnvironment() { return environment; }
+    public String getType() { return type; }
+    public String getName() { return name; }
+    public Integer getId() { return id; }
+    public Integer getCreatedBy() { return createdBy; }
+    public void setCreatedBy(Integer createdBy) { this.createdBy = createdBy; }
+    public void setProjectId(Integer projectId) { this.projectId = projectId; }
+    public void setLastRun(LocalDateTime lastRun) { this.lastRun = lastRun; }
+    public void setLastResult(String lastResult) { this.lastResult = lastResult; }
+    public LocalDateTime getLastRun() { return lastRun; }
 }

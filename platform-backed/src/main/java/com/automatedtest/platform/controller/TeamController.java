@@ -42,18 +42,38 @@ public class TeamController {
             return Result.error("未登录");
         }
 
-        if ("admin".equalsIgnoreCase(user.getRole())) {
-            return Result.success(teamService.lambdaQuery().eq(Team::getIsDeleted, false).list());
+        boolean isSystemAdmin = "admin".equalsIgnoreCase(user.getRole());
+        List<Team> teams;
+        if (isSystemAdmin) {
+            teams = teamService.lambdaQuery().eq(Team::getIsDeleted, false).list();
+            // For system admin, show membership role if exists; otherwise leave empty
+            List<TeamMember> myMemberships = teamMemberService.list(new QueryWrapper<TeamMember>().eq("user_id", user.getId().intValue()));
+            if (!myMemberships.isEmpty()) {
+                java.util.Map<Integer, String> roleMap = myMemberships.stream()
+                        .collect(java.util.stream.Collectors.toMap(TeamMember::getTeamId, TeamMember::getRole, (a, b) -> a));
+                for (Team t : teams) {
+                    String r = roleMap.get(t.getId());
+                    if (r != null) t.setRole(r);
+                }
+            }
+            return Result.success(teams);
+        } else {
+            List<TeamMember> memberships = teamMemberService.list(new QueryWrapper<TeamMember>().eq("user_id", user.getId().intValue()));
+            if (memberships.isEmpty()) {
+                return Result.success(Collections.emptyList());
+            }
+            List<Integer> teamIds = memberships.stream().map(TeamMember::getTeamId).collect(Collectors.toList());
+            teams = teamService.lambdaQuery().in(Team::getId, teamIds).eq(Team::getIsDeleted, false).list();
+            if (!teams.isEmpty()) {
+                java.util.Map<Integer, String> roleMap = memberships.stream()
+                        .collect(java.util.stream.Collectors.toMap(TeamMember::getTeamId, TeamMember::getRole, (a, b) -> a));
+                for (Team t : teams) {
+                    String r = roleMap.get(t.getId());
+                    if (r != null) t.setRole(r);
+                }
+            }
+            return Result.success(teams);
         }
-
-        List<TeamMember> memberships = teamMemberService.list(new QueryWrapper<TeamMember>().eq("user_id", user.getId().intValue()));
-        if (memberships.isEmpty()) {
-            return Result.success(Collections.emptyList());
-        }
-        
-        List<Integer> teamIds = memberships.stream().map(TeamMember::getTeamId).collect(Collectors.toList());
-        List<Team> teams = teamService.lambdaQuery().in(Team::getId, teamIds).eq(Team::getIsDeleted, false).list();
-        return Result.success(teams);
     }
 
     @PostMapping
@@ -188,6 +208,7 @@ public class TeamController {
     }
 
     @DeleteMapping("/{id}")
+    @com.automatedtest.platform.annotation.OperationAudit(module = "Team", operation = "Delete Team")
     public Result<Boolean> delete(@PathVariable Integer id) {
         User user = UserContext.getCurrentUser();
         if (user == null) return Result.error("未登录");
@@ -195,17 +216,10 @@ public class TeamController {
         Team team = teamService.getById(id);
         if (team == null) return Result.error("团队不存在");
 
-        // Check permissions: System Admin or Team Admin (Creator)
+        // Permission: Only System Admin can delete a team
         boolean isSystemAdmin = "admin".equalsIgnoreCase(user.getRole());
-        
         if (!isSystemAdmin) {
-            TeamMember currentMember = teamMemberService.getOne(new QueryWrapper<TeamMember>()
-                .eq("team_id", id)
-                .eq("user_id", user.getId().intValue()));
-            
-            if (currentMember == null || !"admin".equalsIgnoreCase(currentMember.getRole())) {
-                return Result.error("无权限删除团队");
-            }
+            return Result.error("只有系统管理员可以删除团队");
         }
 
         team.setIsDeleted(true);

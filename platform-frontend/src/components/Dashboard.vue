@@ -102,6 +102,11 @@ const barOption = ref<any>({
     trigger: 'axis'
   },
   legend: {
+    type: 'scroll',
+    top: 5,
+    left: 'center',
+    itemGap: 35,
+    padding: [0, 10],
     data: [
       { name: 'API用例执行数', icon: 'roundRect' },
       { name: 'WEB用例执行数', icon: 'roundRect' },
@@ -112,14 +117,15 @@ const barOption = ref<any>({
     ]
   },
   grid: {
+    top: 70,
     left: '3%',
-    right: '4%',
+    right: '15%',
     bottom: '3%',
     containLabel: true
   },
   xAxis: {
     type: 'category',
-    boundaryGap: false,
+    boundaryGap: true,
     data: []
   },
   yAxis: [
@@ -216,6 +222,7 @@ const loading = ref(false)
 const backendDown = ref(false)
 const healthScore = ref(0)
 const healthMeta = ref({ passRate: 0, coverage: 0, stability: 0 })
+const topFailedCases = ref<any[]>([])
 
 const fetchData = async () => {
   if (loading.value) return
@@ -236,6 +243,8 @@ const fetchData = async () => {
       myRunningTasks.value = res.myRunningTasks.map((task: any) => ({
         id: task.id,
         name: task.name,
+        type: task.type,
+        reportId: task.reportId,
         startTime: new Date(task.lastRunTime).toLocaleString()
       }))
     }
@@ -245,8 +254,17 @@ const fetchData = async () => {
       myFailedPlans.value = res.myFailedPlans.map((plan: any) => ({
         id: plan.id,
         name: plan.name,
+        type: plan.type,
+        reportId: plan.reportId,
         failTime: new Date(plan.lastRunTime).toLocaleString()
       }))
+    }
+    
+    // Top Failed Cases
+    if (Array.isArray(res.topFailedCases)) {
+      topFailedCases.value = res.topFailedCases
+    } else {
+      topFailedCases.value = []
     }
 
     let totalCases = Number((res as any).totalCases ?? 0) || 0
@@ -292,9 +310,12 @@ const fetchData = async () => {
     }
 
     if (totalCases === 0) {
-      totalExecutions = 0
-      passedCases = 0
-      failedCases = 0
+      // Don't zero out execution stats just because total cases is 0
+      // It might be that cases were deleted but reports exist?
+      // Or maybe API returned correct execution counts but 0 cases?
+      // totalExecutions = 0
+      // passedCases = 0
+      // failedCases = 0
     }
 
     stats.value[0].value = totalCases.toString()
@@ -373,13 +394,28 @@ const fetchData = async () => {
     }
     
     // Update Recent Activities
-    recentActivities.value = res.recentActivity.map((item: any, index: number) => ({
-      id: index,
-      type: item.status,
-      case: item.caseName || 'Unknown Case',
-      time: item.timeAgo,
-      executor: item.executedBy || 'System'
-    }))
+    recentActivities.value = res.recentActivity.map((item: any, index: number) => {
+      let timeStr = item.timeAgo
+      if (item.timestamp) {
+        const date = new Date(item.timestamp)
+        // Format as YYYY-MM-DD HH:mm:ss
+        const y = date.getFullYear()
+        const m = String(date.getMonth() + 1).padStart(2, '0')
+        const d = String(date.getDate()).padStart(2, '0')
+        const h = String(date.getHours()).padStart(2, '0')
+        const min = String(date.getMinutes()).padStart(2, '0')
+        const s = String(date.getSeconds()).padStart(2, '0')
+        timeStr = `${y}-${m}-${d} ${h}:${min}:${s}`
+      }
+      
+      return {
+        id: index,
+        type: item.status,
+        case: item.caseName || 'Unknown Case',
+        time: timeStr,
+        executor: item.executedBy || 'System'
+      }
+    })
     
   } catch (e: any) {
     console.error('Failed to fetch dashboard data', e)
@@ -439,6 +475,28 @@ const handleBarClick = (params: any) => {
     router.push({ path: '/reports', query: { date } })
   }
 }
+
+const handleRunningTaskClick = (task: any) => {
+   if (task.reportId) {
+     router.push(`/reports/${task.reportId}`)
+   } else if (task.type === 'Plan') {
+     router.push('/plans')
+   } else {
+     router.push('/api-cases')
+   }
+ }
+ 
+ const handleFailedItemClick = (item: any) => {
+   if (item.reportId) {
+     router.push(`/reports/${item.reportId}`)
+   } else if (item.type === 'Plan') {
+     router.push('/reports?status=failed')
+   } else {
+     // For single case failure, we can search by case name
+     const pureName = item.name.replace('[单例] ', '')
+     router.push({ path: '/reports', query: { status: 'failed', keyword: pureName } })
+   }
+ }
 </script>
 
 <template>
@@ -559,7 +617,10 @@ const handleBarClick = (params: any) => {
         </CardHeader>
         <CardContent>
           <div v-if="myRunningTasks.length > 0" class="space-y-4">
-            <div v-for="task in myRunningTasks" :key="task.id" class="flex items-center justify-between p-3 bg-blue-50 rounded-lg">
+            <div v-for="task in myRunningTasks" :key="task.id" 
+              class="flex items-center justify-between p-3 bg-blue-50 rounded-lg cursor-pointer hover:bg-blue-100 transition-colors"
+              @click="handleRunningTaskClick(task)"
+            >
               <div class="flex flex-col">
                 <span class="font-medium text-gray-900">{{ task.name }}</span>
                 <span class="text-xs text-gray-500">开始时间: {{ task.startTime }}</span>
@@ -575,6 +636,25 @@ const handleBarClick = (params: any) => {
           </div>
         </CardContent>
       </Card>
+      
+      <!-- Top Failed Cases -->
+      <Card class="border-gray-200">
+        <CardHeader class="flex flex-row items-center justify-between pb-2">
+          <CardTitle>失败分布 TOP N</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div v-if="topFailedCases.length === 0" class="text-sm text-gray-500">暂无失败集中项</div>
+          <div v-else class="space-y-2">
+            <div v-for="item in topFailedCases" :key="item.id" class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <Badge variant="outline" class="text-xs">失败次数 {{ item.count || 0 }}</Badge>
+                <span class="text-sm text-gray-700">{{ item.name }}</span>
+              </div>
+              <Button variant="ghost" size="sm" @click="goToReportsByKeyword(item.name)">查看报告</Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <!-- Exception Reminders -->
       <Card class="border-gray-200">
@@ -584,7 +664,10 @@ const handleBarClick = (params: any) => {
         </CardHeader>
         <CardContent>
           <div v-if="myFailedPlans.length > 0" class="space-y-4">
-            <div v-for="plan in myFailedPlans" :key="plan.id" class="flex items-center justify-between p-3 bg-red-50 rounded-lg cursor-pointer hover:bg-red-100 transition-colors" @click="router.push('/reports?status=failed')">
+            <div v-for="plan in myFailedPlans" :key="plan.id" 
+              class="flex items-center justify-between p-3 bg-red-50 rounded-lg cursor-pointer hover:bg-red-100 transition-colors" 
+              @click="handleFailedItemClick(plan)"
+            >
               <div class="flex flex-col">
                 <span class="font-medium text-gray-900">{{ plan.name }}</span>
                 <span class="text-xs text-gray-500">失败时间: {{ plan.failTime }}</span>

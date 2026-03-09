@@ -87,6 +87,96 @@ public class TestCaseController {
         String executedBy = user != null ? user.getUsername() : "Project API Key";
         return Result.success(testCaseService.executeCaseById(id, executedBy));
     }
+    
+    @PostMapping("/{id}/execute-batch")
+    @OperationAudit(module = "TestCase", operation = "Execute Test Case Batch")
+    public Result<java.util.Map<String, Object>> executeBatch(@PathVariable Integer id, @RequestBody com.automatedtest.platform.dto.BatchExecuteRequestDTO req) {
+        TestCase testCase = testCaseService.getById(id);
+        if (testCase == null) {
+            return Result.error("测试用例不存在");
+        }
+        Integer contextProjectId = UserContext.getCurrentProjectId();
+        if (contextProjectId != null && !testCase.getProjectId().equals(contextProjectId)) {
+            return Result.error("当前项目上下文不匹配");
+        }
+        User user = UserContext.getCurrentUser();
+        String executedBy = user != null ? user.getUsername() : "Project API Key";
+        java.util.List<java.util.Map<String, String>> rows = new java.util.ArrayList<>();
+        if (req != null && req.getRows() != null && !req.getRows().isEmpty()) {
+            rows.addAll(req.getRows());
+        } else if (req != null && req.getCsv() != null && !req.getCsv().trim().isEmpty()) {
+            String[] lines = req.getCsv().split("\\r?\\n");
+            if (lines.length > 1) {
+                String[] headers = lines[0].split(",");
+                for (int i = 1; i < lines.length; i++) {
+                    String[] vals = lines[i].split(",");
+                    java.util.Map<String, String> map = new java.util.HashMap<>();
+                    for (int h = 0; h < headers.length && h < vals.length; h++) {
+                        map.put(headers[h].trim(), vals[h].trim());
+                    }
+                    rows.add(map);
+                }
+            }
+        }
+        if (rows.isEmpty()) {
+            return Result.error("缺少批量执行数据");
+        }
+        int concurrency = req != null && req.getConcurrency() != null && req.getConcurrency() > 1 ? req.getConcurrency() : 1;
+        java.util.List<java.util.Map<String, Object>> items = new java.util.ArrayList<>();
+        int successCount = 0;
+        int failedCount = 0;
+        long totalDuration = 0L;
+        if (concurrency <= 1) {
+            int idx = 0;
+            for (java.util.Map<String, String> vars : rows) {
+                idx++;
+                com.automatedtest.platform.dto.CaseExecuteResultDTO r = testCaseService.executeCaseByIdWithVariables(id, executedBy, vars);
+                boolean ok = r != null && "success".equalsIgnoreCase(r.getStatus());
+                if (ok) successCount++; else failedCount++;
+                if (r != null && r.getDurationMs() != null) totalDuration += r.getDurationMs();
+                java.util.Map<String, Object> item = new java.util.HashMap<>();
+                item.put("index", idx);
+                item.put("status", r != null ? r.getStatus() : "failed");
+                item.put("durationMs", r != null ? r.getDurationMs() : null);
+                item.put("reportId", r != null ? r.getReportId() : null);
+                items.add(item);
+            }
+        } else {
+            java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(concurrency);
+            java.util.List<java.util.concurrent.Future<java.util.Map<String, Object>>> futures = new java.util.ArrayList<>();
+            for (int i = 0; i < rows.size(); i++) {
+                final int idx = i + 1;
+                final java.util.Map<String, String> vars = rows.get(i);
+                futures.add(pool.submit(() -> {
+                    com.automatedtest.platform.dto.CaseExecuteResultDTO r = testCaseService.executeCaseByIdWithVariables(id, executedBy, vars);
+                    java.util.Map<String, Object> item = new java.util.HashMap<>();
+                    item.put("index", idx);
+                    item.put("status", r != null ? r.getStatus() : "failed");
+                    item.put("durationMs", r != null ? r.getDurationMs() : null);
+                    item.put("reportId", r != null ? r.getReportId() : null);
+                    return item;
+                }));
+            }
+            pool.shutdown();
+            for (java.util.concurrent.Future<java.util.Map<String, Object>> f : futures) {
+                try {
+                    java.util.Map<String, Object> item = f.get();
+                    items.add(item);
+                    Object status = item.get("status");
+                    if ("success".equals(String.valueOf(status))) successCount++; else failedCount++;
+                    Object dur = item.get("durationMs");
+                    if (dur instanceof Number) totalDuration += ((Number) dur).longValue();
+                } catch (Exception ignored) {}
+            }
+        }
+        java.util.Map<String, Object> summary = new java.util.HashMap<>();
+        summary.put("total", rows.size());
+        summary.put("success", successCount);
+        summary.put("failed", failedCount);
+        summary.put("avgDurationMs", rows.size() > 0 ? totalDuration / rows.size() : 0L);
+        summary.put("items", items);
+        return Result.success(summary);
+    }
 
     @GetMapping
     public Result<IPage<TestCase>> list(@RequestParam(defaultValue = "1") Integer page,

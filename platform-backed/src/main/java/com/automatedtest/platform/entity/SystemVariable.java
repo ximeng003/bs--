@@ -29,4 +29,7 @@ public class SystemVariable implements Serializable {
 
     @TableField(value = "updated_at", fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updatedAt;
+    
+    public String getKeyName() { return keyName; }
+    public String getValue() { return value; }
 }

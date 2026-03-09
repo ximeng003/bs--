@@ -14,6 +14,7 @@ const route = useRoute()
 const caseId = ref<string | null>(null)
 const caseName = ref('Web首页功能测试')
 const deviceType = ref('web')
+const selfHealingEnabled = ref(true)
 const existingDescription = ref<string | null>(null)
 const isExecuting = ref(false)
 const executionLogs = ref<string[]>([])
@@ -207,23 +208,53 @@ const parseScriptToSteps = (text: string) => {
             continue
         }
         if (line.startsWith('点击元素:') || line.startsWith('点击按钮:')) {
-            const value = line.split(':')[1]?.trim() || ''
-            const selector = parseSelector(value)
-            steps.push({ action: 'click', ...selector })
+            const raw = line.split(':')[1]?.trim() || ''
+            const partsAll = raw.split('|').map(p => p.trim()).filter(Boolean)
+            const primary = partsAll[0] || ''
+            const selector = parseSelector(primary)
+            const fallbacks: any[] = []
+            for (let i = 1; i < partsAll.length; i++) {
+                const fb = partsAll[i]
+                const sel = parseSelector(fb)
+                fallbacks.push(sel)
+            }
+            const step: any = { action: 'click', ...selector }
+            if (fallbacks.length) step.fallbacks = fallbacks
+            steps.push(step)
         } else if (line.startsWith('输入文本:')) {
             const payload = line.split(':')[1] || ''
-            const parts = payload.split(',').map(p => p.trim())
-            const value = parts[0]
-            const textValue = parts[1] || ''
-            const selector = parseSelector(value)
-            steps.push({ action: 'input', ...selector, text: textValue, clear: true })
+            const firstComma = payload.indexOf(',')
+            const selectorRaw = firstComma >= 0 ? payload.slice(0, firstComma).trim() : payload.trim()
+            const textPart = firstComma >= 0 ? payload.slice(firstComma + 1).trim() : ''
+            const selectorTokens = selectorRaw.split('|').map(p => p.trim()).filter(Boolean)
+            const primarySel = selectorTokens[0] || ''
+            const selector = parseSelector(primarySel)
+            const fallbacks: any[] = []
+            for (let i = 1; i < selectorTokens.length; i++) {
+                const fb = selectorTokens[i]
+                const sel = parseSelector(fb)
+                fallbacks.push(sel)
+            }
+            const step: any = { action: 'input', ...selector, text: textPart || '', clear: true }
+            if (fallbacks.length) step.fallbacks = fallbacks
+            steps.push(step)
         } else if (line.startsWith('等待元素:')) {
             const payload = line.split(':')[1] || ''
-            const parts = payload.split(',').map(p => p.trim())
-            const value = parts[0]
-            const ms = parseInt(parts[1] || '1000')
-            const selector = parseSelector(value)
-            steps.push({ action: 'wait', ...selector, ms: isNaN(ms) ? 1000 : ms })
+            const firstComma = payload.indexOf(',')
+            const selectorRaw = firstComma >= 0 ? payload.slice(0, firstComma).trim() : payload.trim()
+            const msStr = firstComma >= 0 ? payload.slice(firstComma + 1).trim() : '1000'
+            const selectorTokens = selectorRaw.split('|').map(p => p.trim()).filter(Boolean)
+            const primarySel = selectorTokens[0] || ''
+            const selector = parseSelector(primarySel)
+            const fallbacks: any[] = []
+            for (let i = 1; i < selectorTokens.length; i++) {
+                const fb = selectorTokens[i]
+                const sel = parseSelector(fb)
+                fallbacks.push(sel)
+            }
+            const step: any = { action: 'wait', ...selector, ms: isNaN(parseInt(msStr)) ? 1000 : parseInt(msStr) }
+            if (fallbacks.length) step.fallbacks = fallbacks
+            steps.push(step)
         } else if (line.startsWith('等待时间:')) {
             const msStr = line.split(':')[1] || '1000'
             const ms = parseInt(msStr)
@@ -250,8 +281,8 @@ const handleSave = async () => {
     try {
         const descRaw = existingDescription.value ? existingDescription.value.trim() : ''
         const descClean = descRaw === 'Updated from Script Editor' ? '' : descRaw
-        const contentObj = deviceType.value === 'web'
-            ? { language: 'python', script: scriptContent.value }
+    const contentObj = deviceType.value === 'web'
+        ? { language: 'python', script: scriptContent.value, selfHealing: selfHealingEnabled.value }
             : {
                 appium: {
                     remoteUrl: appiumConf.value.remoteUrl,
@@ -263,7 +294,8 @@ const handleSave = async () => {
                         appActivity: appiumConf.value.appActivity
                     }
                 },
-                steps: parseScriptToSteps(scriptContent.value)
+                steps: parseScriptToSteps(scriptContent.value),
+                selfHealing: selfHealingEnabled.value
             }
         const payload = {
             id: caseId.value,
@@ -291,40 +323,6 @@ const handleSave = async () => {
         showToast('保存失败', 'error')
     }
 }
-
-const webKeywords = [
-  { category: '导航操作', items: [
-      { label: '打开URL', value: '打开URL: https://example.com' },
-      { label: '刷新页面', value: '刷新页面' },
-      { label: '后退', value: '后退' },
-      { label: '前进', value: '前进' },
-      { label: '关闭浏览器', value: '关闭浏览器' }
-  ]},
-  { category: '元素操作', items: [
-      { label: '点击元素', value: '点击元素: #selector' },
-      { label: '输入文本', value: '输入文本: #selector, text' },
-      { label: '清空文本', value: '清空文本: #selector' },
-      { label: '选择下拉框', value: '选择下拉框: #selector, value' },
-      { label: '上传文件', value: '上传文件: #selector, path/to/file' }
-  ]},
-  { category: '等待操作', items: [
-      { label: '等待元素', value: '等待元素: #selector, 5000' },
-      { label: '等待时间', value: '等待时间: 1000' },
-      { label: '等待页面加载', value: '等待页面加载' }
-  ]},
-  { category: '断言验证', items: [
-      { label: '断言文本', value: '断言文本: #selector, expected_text' },
-      { label: '断言元素存在', value: '断言元素存在: #selector' },
-      { label: '断言URL包含', value: '断言URL包含: part_of_url' },
-      { label: '断言属性值', value: '断言属性值: #selector, attribute, value' }
-  ]},
-  { category: '其他操作', items: [
-      { label: '截图', value: '截图: screenshot.png' },
-      { label: '滚动到元素', value: '滚动到元素: #selector' },
-      { label: '执行JS脚本', value: '执行JS脚本: return document.title' },
-      { label: '切换窗口', value: '切换窗口: 1' }
-  ]}
-]
 
 const appKeywords = [
   { category: '应用操作', items: [
@@ -427,6 +425,13 @@ const handleCopyCode = () => {
                 <SelectItem value="app">移动端 App</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+          <div class="space-y-1 w-40">
+            <div class="text-xs text-gray-500">自愈</div>
+            <div class="flex items-center gap-2">
+              <Switch v-model:checked="selfHealingEnabled" />
+              <span class="text-xs text-gray-600">{{ selfHealingEnabled ? '启用' : '关闭' }}</span>
+            </div>
           </div>
         </div>
         <div class="flex items-center gap-2">

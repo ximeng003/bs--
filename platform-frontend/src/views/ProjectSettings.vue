@@ -354,12 +354,18 @@ const copyToClipboard = (text: string) => {
   navigator.clipboard.writeText(text)
   showToast('已复制', 'success')
 }
-const visibleEnv = new Set<number>()
+const visibleEnv = ref(new Set<number>())
 const toggleEnv = (id?: number) => {
   if (!id) return
-  if (visibleEnv.has(id)) visibleEnv.delete(id)
-  else visibleEnv.add(id)
-  if (id && visibleEnv.has(id)) {
+  if (visibleEnv.value.has(id)) {
+    visibleEnv.value.delete(id)
+  } else {
+    visibleEnv.value.add(id)
+  }
+  // Trigger re-render by creating a new Set
+  visibleEnv.value = new Set(visibleEnv.value)
+  
+  if (id && visibleEnv.value.has(id)) {
     try {
       void request.get(`/environments/${id}/view`)
     } catch {}
@@ -368,8 +374,13 @@ const toggleEnv = (id?: number) => {
 const toggleDb = (id?: number) => {
   if (!id) return
   const key = (id || 0) * 1000
-  if (visibleEnv.has(key)) visibleEnv.delete(key)
-  else visibleEnv.add(key)
+  if (visibleEnv.value.has(key)) {
+    visibleEnv.value.delete(key)
+  } else {
+    visibleEnv.value.add(key)
+  }
+  // Trigger re-render
+  visibleEnv.value = new Set(visibleEnv.value)
 }
 
 watch(() => projectStore.currentProject, (newVal) => {

@@ -40,6 +40,8 @@ public class TestReport implements Serializable {
     @TableField("executed_by")
     private String executedBy;
 
+    private String triggerType; // manual, schedule, openapi
+
     @TableField("asserts_total")
     private Integer assertsTotal;
 
@@ -63,4 +65,39 @@ public class TestReport implements Serializable {
 
     @TableField("is_deleted")
     private Boolean isDeleted;
+
+    public Integer getCaseId() { return caseId; }
+    public String getStatus() { return status; }
+    public String getExecutedBy() { return executedBy; }
+    public LocalDateTime getExecutedAt() { return executedAt; }
+    public Integer getId() { return id; }
+    public Integer getPlanId() { return planId; }
+    public void setCaseName(String caseName) { this.caseName = caseName; }
+    public void setPlanName(String planName) { this.planName = planName; }
+    public void setEnvironment(String environment) { this.environment = environment; }
+    public Integer getProjectId() { return projectId; }
+    public Integer getExecutionTime() { return executionTime; }
+    public String getLogs() { return logs; }
+    public Integer getAssertsTotal() { return assertsTotal; }
+    public Integer getAssertsPassed() { return assertsPassed; }
+    public Integer getAssertsFailed() { return assertsFailed; }
+    public void setProjectId(Integer projectId) { this.projectId = projectId; }
+    public void setExecutedBy(String executedBy) { this.executedBy = executedBy; }
+    public Integer getPlanRunNo() { return planRunNo; }
+    public void setPlanRunNo(Integer planRunNo) { this.planRunNo = planRunNo; }
+    public void setCaseId(Integer caseId) { this.caseId = caseId; }
+    public void setStatus(String status) { this.status = status; }
+    public void setExecutionTime(Integer executionTime) { this.executionTime = executionTime; }
+    public void setLogs(String logs) { this.logs = logs; }
+    public void setExecutedAt(LocalDateTime executedAt) { this.executedAt = executedAt; }
+    public void setAssertsTotal(Integer assertsTotal) { this.assertsTotal = assertsTotal; }
+    public void setAssertsPassed(Integer assertsPassed) { this.assertsPassed = assertsPassed; }
+    public void setAssertsFailed(Integer assertsFailed) { this.assertsFailed = assertsFailed; }
+    public String getEnvironment() { return environment; }
+    public void setCaseType(String caseType) { this.caseType = caseType; }
+    public Boolean getIsDeleted() { return isDeleted; }
+    public void setIsDeleted(Boolean isDeleted) { this.isDeleted = isDeleted; }
+
+    public String getTriggerType() { return triggerType; }
+    public void setTriggerType(String triggerType) { this.triggerType = triggerType; }
 }

@@ -91,6 +91,7 @@ const router = useRouter()
 const report = ref<ReportDetail | null>(null)
 const testCase = ref<RawTestCase | null>(null)
 const planSummary = ref<PlanSummaryForReport | null>(null)
+const showBackToReports = computed(() => route.query.from !== 'reports')
 
 const formatEnvironment = (env: string | null | undefined) => {
   if (!env) return ''
@@ -925,7 +926,7 @@ const selectReportItem = async (item: PlanItemForReport) => {
 }
 
 const handleExport = async () => {
-  if (!planSummary.value) {
+  if (!report.value) {
     showToast('暂无报告数据可导出', 'warning')
     return
   }
@@ -933,31 +934,81 @@ const handleExport = async () => {
   showToast('正在获取完整报告数据，请稍候...', 'info')
   
   try {
-    const items = planSummary.value.items || []
+    let detailedItems: any[] = []
     
-    // 并行获取每个用例的详细报告和定义，以生成真实数据
-    const detailedItemsPromises = items.map(fetchAndProcessItem)
-    
-    const detailedItems = await Promise.all(detailedItemsPromises)
+    if (planSummary.value) {
+      // 计划报告：并行获取每个用例的详细报告和定义
+      const items = planSummary.value.items || []
+      const detailedItemsPromises = items.map(fetchAndProcessItem)
+      detailedItems = await Promise.all(detailedItemsPromises)
+    } else {
+      // 单例报告：构建当前单个用例的数据
+      const singleItem: PlanItemForReport = {
+        reportId: report.value.id,
+        caseId: report.value.caseId,
+        caseName: report.value.caseName,
+        caseType: report.value.caseType,
+        status: report.value.status,
+        durationMs: report.value.executionTime
+      }
+      const processed = await fetchAndProcessItem(singleItem)
+      detailedItems = [processed]
+    }
 
     const exportData = {
       reportDetail: report.value,
-      planSummary: planSummary.value,
+      planSummary: planSummary.value || {
+        planId: 0,
+        planName: report.value.caseName || '单例测试报告',
+        total: 1,
+        success: report.value.status === 'success' ? 1 : 0,
+        failed: report.value.status === 'success' ? 0 : 1,
+        durationMs: report.value.executionTime || 0,
+        avgDurationMs: report.value.executionTime || 0,
+        environment: report.value.environment,
+        items: []
+      },
       planItems: detailedItems,
       exportedAt: new Date().toISOString()
     }
     
     const htmlContent = generateReportHtml(exportData)
-    const blob = new Blob([htmlContent], { type: 'text/html' })
+    if (!htmlContent) {
+      throw new Error('生成的 HTML 内容为空')
+    }
+    
+    const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' })
     const url = window.URL.createObjectURL(blob)
+    
+    // 创建一个隐藏的 a 标签并点击
     const link = document.createElement('a')
+    link.style.display = 'none'
     link.href = url
-    link.download = `report-plan-${planSummary.value.planId}-${report.value?.planRunNo || 'latest'}.html`
+    
+    const fileName = planSummary.value 
+      ? `report-plan-${planSummary.value.planId}-${report.value?.planRunNo || 'latest'}.html`
+      : `report-case-${report.value.caseId || 'single'}-${report.value.id}.html`
+    
+    link.setAttribute('download', fileName)
+    
+    // 兼容性处理：必须添加到 DOM 中
     document.body.appendChild(link)
+    
+    // 触发点击
     link.click()
-    document.body.removeChild(link)
-    window.URL.revokeObjectURL(url)
-    showToast('报告导出成功', 'success')
+    
+    // 延迟更久一点释放资源，对于大的 Blob 文件更有保障
+    setTimeout(() => {
+      if (document.body.contains(link)) {
+        document.body.removeChild(link)
+      }
+      window.URL.revokeObjectURL(url)
+    }, 1000)
+    
+    // 延迟提示成功，确保是在开始下载之后
+    setTimeout(() => {
+      showToast('报告导出成功，请查看浏览器下载列表', 'success')
+    }, 500)
   } catch (e) {
     console.error('Export failed:', e)
     showToast('报告导出失败', 'error')
@@ -966,18 +1017,69 @@ const handleExport = async () => {
 
 const handleShare = async () => {
   try {
-    await navigator.clipboard.writeText(window.location.href)
-    showToast('链接已复制到剪贴板', 'success')
+    const idStr = route.params.id as string
+    const res: any = await request.post(`/reports/${idStr}/share`, { hours: 24 })
+    const token = res?.token || res?.data?.token || ''
+    if (!token) {
+      showToast('生成分享链接失败', 'error')
+      return
+    }
+    const url = `${window.location.origin}/api/public/share/report?token=${encodeURIComponent(token)}`
+    shareLink.value = url
+    shareDialogOpen.value = true
   } catch (e) {
-    console.error('Copy failed:', e)
-    showToast('复制链接失败，请手动复制', 'error')
+    console.error('Generate share failed:', e)
+    showToast('生成分享链接失败', 'error')
+  }
+}
+
+const screenshotInfo = computed(() => {
+  // 查找执行步骤中是否有截图操作
+  const steps = executionSteps.value
+  const screenshotStep = steps.find(s => s.action === '截图' || s.details?.toLowerCase().includes('screenshot'))
+  
+  if (screenshotStep) {
+    return {
+      fileName: screenshotStep.details.replace('screenshot ', '').trim() || 'screenshot.png',
+      available: false // 目前后端尚未支持文件存储
+    }
+  }
+  
+  // 备选方案：从日志中查找
+  const logLine = logLines.value.find(l => l.toLowerCase().includes('screenshot'))
+  if (logLine) {
+    return {
+      fileName: logLine.split('screenshot')[1]?.trim() || 'screenshot.png',
+      available: false
+    }
+  }
+
+  return null
+})
+
+const handleDownloadScreenshot = () => {
+  if (screenshotInfo.value) {
+    showToast(`由于当前系统未配置云存储，截图文件 [${screenshotInfo.value.fileName}] 仅保存在执行引擎本地，暂不支持远程下载。`, 'warning', 5000)
+  } else {
+    showToast('该报告未捕获到错误截图。', 'info')
+  }
+}
+
+const shareDialogOpen = ref(false)
+const shareLink = ref('')
+const copyShareLink = async () => {
+  try {
+    await navigator.clipboard.writeText(shareLink.value)
+    showToast('链接已复制到剪贴板', 'success')
+  } catch {
+    showToast('复制失败，请手动复制', 'error')
   }
 }
 </script>
 
 <template>
   <div class="p-6 space-y-6">
-    <div class="mb-2">
+    <div class="mb-2" v-if="showBackToReports">
       <Button
         variant="outline"
         size="sm"
@@ -1285,11 +1387,11 @@ const handleShare = async () => {
             </div>
           </div>
           <div class="flex gap-2">
-            <Button variant="outline" size="sm" class="border-gray-300">
+            <Button variant="outline" size="sm" class="border-gray-300" @click="handleExport">
               <Download class="w-4 h-4 mr-2" />
               导出报告
             </Button>
-            <Button variant="outline" size="sm" class="border-gray-300">
+            <Button variant="outline" size="sm" class="border-gray-300" @click="handleShare">
               <Share2 class="w-4 h-4 mr-2" />
               分享
             </Button>
@@ -1399,7 +1501,7 @@ const handleShare = async () => {
               <AlertCircle class="w-5 h-5 text-red-500" />
               错误截图
             </h3>
-            <div class="bg-gray-100 border-2 border-dashed border-gray-300 rounded p-8 text-center">
+            <div v-if="screenshotInfo" class="bg-gray-100 border-2 border-dashed border-gray-300 rounded p-8 text-center">
               <div class="space-y-3">
                 <div class="w-16 h-16 bg-gray-300 rounded-lg mx-auto flex items-center justify-center">
                   <svg class="w-8 h-8 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1407,20 +1509,45 @@ const handleShare = async () => {
                   </svg>
                 </div>
                 <div>
-                  <p class="text-sm text-gray-600 mb-2">payment_result.png</p>
+                  <p class="text-sm text-gray-600 mb-2">{{ screenshotInfo.fileName }}</p>
                   <p class="text-xs text-gray-500">
                     错误发生时的页面截图
                   </p>
                 </div>
-                <Button size="sm" variant="outline" class="border-gray-300">
+                <Button size="sm" variant="outline" class="border-gray-300" @click="handleDownloadScreenshot">
                   <Download class="w-4 h-4 mr-2" />
                   下载截图
                 </Button>
               </div>
+            </div>
+            <div v-else class="text-center py-12 text-gray-400">
+              <div class="mb-2">
+                <FileText class="w-12 h-12 mx-auto opacity-20" />
+              </div>
+              <p class="text-sm">该测试运行未捕获到截图信息</p>
+              <p class="text-xs mt-1">请在测试脚本中添加截图步骤</p>
             </div>
           </CardContent>
         </Card>
       </div>
     </div>
   </div>
+  <Dialog v-model:open="shareDialogOpen">
+    <DialogContent class="sm:max-w-[520px]">
+      <DialogHeader>
+        <DialogTitle>分享链接</DialogTitle>
+        <DialogDescription>生成可公开访问的报告页面链接（默认有效期24小时）</DialogDescription>
+      </DialogHeader>
+      <div class="space-y-3">
+        <div class="text-sm text-gray-600">链接：</div>
+        <div class="flex items-center gap-2">
+          <Input :value="shareLink" readonly class="flex-1" />
+          <Button variant="outline" @click="copyShareLink">复制</Button>
+        </div>
+        <div class="flex justify-end">
+          <Button variant="outline" @click="shareDialogOpen = false">关闭</Button>
+        </div>
+      </div>
+    </DialogContent>
+  </Dialog>
 </template>

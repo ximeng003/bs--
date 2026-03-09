@@ -28,4 +28,15 @@ public class Team implements Serializable {
 
     @TableField("is_deleted")
     private Boolean isDeleted;
+    
+    @TableField(exist = false)
+    private String role;
+    
+    public Integer getId() { return id; }
+    public String getName() { return name; }
+    public Boolean getIsDeleted() { return isDeleted; }
+    public void setIsDeleted(Boolean isDeleted) { this.isDeleted = isDeleted; }
+    public void setCreatedBy(Integer createdBy) { this.createdBy = createdBy; }
+    public String getRole() { return role; }
+    public void setRole(String role) { this.role = role; }
 }

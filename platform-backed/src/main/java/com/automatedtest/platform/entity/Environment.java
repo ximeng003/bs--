@@ -28,4 +28,10 @@ public class Environment implements Serializable {
 
     @TableField("project_id")
     private Integer projectId;
+    
+    public String getBaseUrl() { return baseUrl; }
+    public String getDatabaseName() { return databaseName; }
+    public void setProjectId(Integer projectId) { this.projectId = projectId; }
+    public Integer getId() { return id; }
+    public Integer getProjectId() { return projectId; }
 }

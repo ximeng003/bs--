@@ -39,4 +39,22 @@ public class Project implements Serializable {
 
     @TableField("health_score")
     private Double healthScore;
+
+    @TableField("is_public")
+    private Boolean isPublic;
+    
+    public Boolean getIsDeleted() { return isDeleted; }
+    public Integer getTeamId() { return teamId; }
+    public void setTeamId(Integer teamId) { this.teamId = teamId; }
+    public void setIsDeleted(Boolean isDeleted) { this.isDeleted = isDeleted; }
+    public void setRole(String role) { this.role = role; }
+    public Integer getId() { return id; }
+    public String getName() { return name; }
+    public void setStatus(String status) { this.status = status; }
+    public void setId(Integer id) { this.id = id; }
+    public void setHealthScore(Double healthScore) { this.healthScore = healthScore; }
+    public String getStatus() { return status; }
+    public String getDescription() { return description; }
+    public void setCreatedBy(Integer createdBy) { this.createdBy = createdBy; }
+    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
 }

@@ -34,6 +34,7 @@ const responseTime = ref<number | null>(null)
 const headers = ref([{ key: 'Content-Type', value: 'application/json', active: true }])
 const params = ref([{ key: '', value: '', active: true }])
 const assertions = ref([{ type: 'status', path: '', value: '200', active: true }])
+const extracts = ref([{ path: '$.token', target: 'API_TOKEN', scope: 'project', active: true }])
 
 const curlDialogOpen = ref(false)
 const curlText = ref('')
@@ -223,6 +224,7 @@ const loadCase = async (id: string) => {
         headers.value = content.headers || []
         params.value = content.params || []
         assertions.value = content.assertions || []
+        extracts.value = content.extract || []
       } catch (e) {
         console.error('Failed to parse content', e)
       }
@@ -240,7 +242,8 @@ const handleSave = async () => {
     body: bodyContent.value,
     headers: headers.value,
     params: params.value,
-    assertions: assertions.value
+    assertions: assertions.value,
+    extract: extracts.value
   })
 
   const descRaw = existingDescription.value ? existingDescription.value.trim() : ''
@@ -511,6 +514,7 @@ const removeAssertion = (index: number) => assertions.value.splice(index, 1)
             <TabsTrigger value="headers">Headers</TabsTrigger>
             <TabsTrigger value="body">Body</TabsTrigger>
             <TabsTrigger value="assertions">Assertions</TabsTrigger>
+            <TabsTrigger value="extract">Extract</TabsTrigger>
           </TabsList>
 
           <TabsContent value="params" class="space-y-4">
@@ -610,12 +614,14 @@ const removeAssertion = (index: number) => assertions.value.splice(index, 1)
                     <SelectContent>
                       <SelectItem value="status">状态码</SelectItem>
                       <SelectItem value="json">JSON路径</SelectItem>
+                      <SelectItem value="header">响应头</SelectItem>
+                      <SelectItem value="regex">正则匹配</SelectItem>
                       <SelectItem value="time">响应时间</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <div class="col-span-4">
-                  <Input v-model="item.path" placeholder="JSONPath（如 $.id）" class="border-gray-300" />
+                  <Input v-model="item.path" :placeholder="item.type==='json' ? 'JSONPath（如 $.id）' : item.type==='header' ? 'Header Key（如 Content-Type）' : item.type==='regex' ? '正则表达式（如 \\\\berror\\\\b）' : '字段/路径'" class="border-gray-300" />
                 </div>
                 <div class="col-span-3">
                   <Input v-model="item.value" placeholder="期望值（如 200 或 1）" class="border-gray-300" />
@@ -627,6 +633,46 @@ const removeAssertion = (index: number) => assertions.value.splice(index, 1)
                 </div>
               </div>
               <Button variant="outline" size="sm" @click="addAssertion">Add Assertion</Button>
+            </div>
+          </TabsContent>
+          
+          <TabsContent value="extract" class="space-y-4">
+            <div class="space-y-3">
+              <div class="grid grid-cols-12 gap-2 text-sm font-semibold text-gray-700 px-2">
+                <div class="col-span-1"></div>
+                <div class="col-span-4">JSONPath</div>
+                <div class="col-span-4">目标变量</div>
+                <div class="col-span-2">作用域</div>
+                <div class="col-span-1"></div>
+              </div>
+              <div v-for="(item, index) in extracts" :key="index" class="grid grid-cols-12 gap-2 items-center">
+                <div class="col-span-1 flex justify-center">
+                  <input type="checkbox" v-model="item.active" class="rounded" />
+                </div>
+                <div class="col-span-4">
+                  <Input v-model="item.path" placeholder="JSONPath（如 $.data.token）" class="border-gray-300" />
+                </div>
+                <div class="col-span-4">
+                  <Input v-model="item.target" placeholder="变量名（如 API_TOKEN）" class="border-gray-300" />
+                </div>
+                <div class="col-span-2">
+                  <Select v-model="item.scope">
+                    <SelectTrigger class="border-gray-300">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="project">项目变量</SelectItem>
+                      <SelectItem value="user">用户变量</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div class="col-span-1">
+                  <Button variant="ghost" size="sm" class="text-gray-400 hover:text-red-600" @click="extracts.splice(index, 1)">
+                    ×
+                  </Button>
+                </div>
+              </div>
+              <Button variant="outline" size="sm" @click="extracts.push({ path: '$.token', target: 'API_TOKEN', scope: 'project', active: true })">Add Extract</Button>
             </div>
           </TabsContent>
         </Tabs>

@@ -18,4 +18,15 @@ public class UserVariable {
     private String description;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+    
+    public String getKeyName() { return keyName; }
+    public String getValue() { return value; }
+    public void setUserId(Long userId) { this.userId = userId; }
+    public Long getId() { return id; }
+    public Long getUserId() { return userId; }
+    public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
+    public void setValue(String value) { this.value = value; }
+    public String getDescription() { return description; }
+    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
+    public void setDescription(String description) { this.description = description; }
 }

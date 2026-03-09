@@ -21,6 +21,12 @@ let toastId = 1
 
 export const showToast = (message: string, type: ToastType = 'info', duration = 3000) => {
   const id = toastId++
+  
+  // 如果是同一个类型的消息或者正在获取数据/导出相关的消息，考虑先清理旧的
+  if (message.includes('获取') || message.includes('导出')) {
+    toasts.value = toasts.value.filter(t => !t.message.includes('获取') && !t.message.includes('导出'))
+  }
+
   toasts.value.push({ id, type, message })
   if (duration > 0) {
     setTimeout(() => {

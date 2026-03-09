@@ -39,4 +39,7 @@ public class Result<T> implements Serializable {
         result.message = message;
         return result;
     }
+    
+    public Integer getCode() { return code; }
+    public String getMessage() { return message; }
 }

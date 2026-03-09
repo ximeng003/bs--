@@ -12,4 +12,13 @@ public class UpdateProfileDTO {
     private Boolean enableNotification;
     private String notifyRule;
     private Integer notifyThreshold;
+    
+    public String getNickname() { return nickname; }
+    public String getEmail() { return email; }
+    public String getPhone() { return phone; }
+    public String getAvatar() { return avatar; }
+    public String getNotificationWebhook() { return notificationWebhook; }
+    public Boolean getEnableNotification() { return enableNotification; }
+    public String getNotifyRule() { return notifyRule; }
+    public Integer getNotifyThreshold() { return notifyThreshold; }
 }

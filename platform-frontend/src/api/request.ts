@@ -29,7 +29,8 @@ request.interceptors.request.use(
       url.startsWith('/projects') ||
       url.startsWith('/teams') ||
       url.startsWith('/user') ||
-      url.startsWith('/auth')
+      url.startsWith('/auth') ||
+      url.startsWith('/permission-requests')
 
     if (projectId && !isGlobalEndpoint) {
       if (!config.headers) config.headers = {} as any
@@ -60,18 +61,19 @@ request.interceptors.response.use(
     console.error('Request Error:', error)
     
     // Auto-recovery for 404 caused by invalid project context
-     if (error.response && error.response.status === 404) {
+     if ((error.response && error.response.status === 404) || 
+         (error.response && error.response.status === 403 && (error.response.data?.message?.includes('access to this project') || error.response.data?.message?.includes('访问权限')))) {
         const currentProjectId = localStorage.getItem('currentProjectId')
         if (currentProjectId) {
            // Prevent infinite reload loops
            const lastReload = sessionStorage.getItem('last_404_reload')
            const now = Date.now()
            if (lastReload && (now - parseInt(lastReload) < 5000)) {
-              console.warn('Loop detected: 404 reload prevented.')
+              console.warn('Loop detected: 404/403 reload prevented.')
               return Promise.reject(error)
            }
            
-           console.warn('Received 404 with active Project ID. Clearing invalid project context to recover.')
+           console.warn('Received 404/403 with active Project ID. Clearing invalid project context to recover.')
            localStorage.removeItem('currentProjectId')
            sessionStorage.setItem('last_404_reload', now.toString())
            

@@ -61,6 +61,12 @@ public class TestPlanController {
     @Autowired
     private com.automatedtest.platform.service.ProjectVariableService projectVariableService;
     
+    @org.springframework.beans.factory.annotation.Value("${engine.max_concurrency:8}")
+    private Integer maxConcurrency;
+    
+    @org.springframework.beans.factory.annotation.Value("${engine.project_max_running:3}")
+    private Integer projectMaxRunning;
+    
     private boolean hasProjectAccess(Integer projectId, Long userId) {
         if (projectId == null || userId == null) return false;
         Project project = projectService.getById(projectId);
@@ -158,10 +164,21 @@ public class TestPlanController {
 
     @PostMapping("/{id}/execute")
     @OperationAudit(module = "TestPlan", operation = "Execute Test Plan")
-    public Result<Map<String, Object>> execute(@PathVariable Integer id) {
+    public Result<Map<String, Object>> execute(@PathVariable Integer id,
+                                               @RequestParam(name = "concurrency", defaultValue = "1") Integer concurrency) {
+        com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
         TestPlan plan = testPlanService.getById(id);
         if (plan == null) {
             return Result.error("测试计划不存在");
+        }
+        
+        // Project running limit
+        long running = testPlanService.lambdaQuery()
+                .eq(com.automatedtest.platform.entity.TestPlan::getProjectId, plan.getProjectId())
+                .eq(com.automatedtest.platform.entity.TestPlan::getLastRunStatus, "Running")
+                .count();
+        if (projectMaxRunning != null && projectMaxRunning > 0 && running >= projectMaxRunning) {
+            return Result.error("同项目运行中的计划过多，请稍后重试");
         }
         
         Integer contextProjectId = com.automatedtest.platform.common.UserContext.getCurrentProjectId();
@@ -171,6 +188,7 @@ public class TestPlanController {
 
         User user = com.automatedtest.platform.common.UserContext.getCurrentUser();
         String executedBy = "System";
+        String triggerType = "schedule";
         boolean isAdmin = false;
         Long userId = null;
         
@@ -178,6 +196,7 @@ public class TestPlanController {
             executedBy = user.getUsername();
             userId = user.getId();
             isAdmin = "admin".equalsIgnoreCase(user.getRole());
+            triggerType = "manual";
             
             if (!isAdmin && !hasProjectAccess(plan.getProjectId(), userId)) {
                  return Result.error("您没有该项目的执行权限");
@@ -188,6 +207,7 @@ public class TestPlanController {
                  return Result.error("Unauthorized execution");
             }
             executedBy = "Project API Key";
+            triggerType = "openapi";
         }
 
         String caseIdsStr = plan.getTestCaseIds();
@@ -230,6 +250,17 @@ public class TestPlanController {
                 }
             }
         }
+        
+        boolean containsUiCase = false;
+        if (caseList != null) {
+            for (TestCase c : caseList) {
+                String t = c.getType() != null ? c.getType().toUpperCase() : "";
+                if ("WEB".equals(t) || "APP".equals(t)) {
+                    containsUiCase = true;
+                    break;
+                }
+            }
+        }
 
         Integer maxRunNo = testReportService.lambdaQuery()
                 .eq(TestReport::getPlanId, id)
@@ -253,35 +284,249 @@ public class TestPlanController {
         long totalDuration = 0L;
         List<Map<String, Object>> items = new ArrayList<>();
         Integer planSummaryReportId = null;
-        for (Integer caseId : caseIds) {
-            if (caseId == null || caseId <= 0) {
-                continue;
+        if (concurrency == null || concurrency < 1) concurrency = 1;
+        if (maxConcurrency != null && maxConcurrency > 0 && concurrency > maxConcurrency) {
+            concurrency = maxConcurrency;
+        }
+        java.util.Map<String, String> planVars = new java.util.HashMap<>();
+        final String executedByFinal = executedBy;
+        
+        boolean hasFlow = plan.getFlowJson() != null && !plan.getFlowJson().trim().isEmpty();
+        if (hasFlow) concurrency = 1;
+        if (!hasFlow && containsUiCase) {
+            if (concurrency > 2) concurrency = 2;
+        }
+        if (hasFlow) {
+            try {
+                java.util.List<?> steps = objectMapper.readValue(plan.getFlowJson(), java.util.List.class);
+                if (steps != null) {
+                    for (Object st : steps) {
+                        if (!(st instanceof java.util.Map)) continue;
+                        @SuppressWarnings("unchecked")
+                        java.util.Map<String, Object> step = (java.util.Map<String, Object>) st;
+                        String type = step.get("type") != null ? step.get("type").toString() : "RUN";
+                        if ("RUN".equalsIgnoreCase(type)) {
+                            Object cidObj = step.get("caseId");
+                            if (cidObj == null) continue;
+                            Integer cid;
+                            try { cid = Integer.parseInt(cidObj.toString()); } catch (Exception e) { continue; }
+                            total++;
+                            java.util.Map<String, String> extra = new java.util.HashMap<>(planVars);
+                            Object varsObj = step.get("vars");
+                            if (varsObj instanceof java.util.Map) {
+                                @SuppressWarnings("unchecked")
+                                java.util.Map<String, Object> vmap = (java.util.Map<String, Object>) varsObj;
+                                for (java.util.Map.Entry<String, Object> en : vmap.entrySet()) {
+                                    String vv = en.getValue() != null ? en.getValue().toString() : "";
+                                    for (java.util.Map.Entry<String, String> pv : planVars.entrySet()) {
+                                        String k = pv.getKey();
+                                        String val = pv.getValue();
+                                        vv = vv.replace("{{" + k + "}}", val != null ? val : "");
+                                    }
+                                    extra.put(en.getKey(), vv);
+                                }
+                            }
+                            CaseExecuteResultDTO result = testCaseService.executeCaseByIdWithVariables(cid, executedByFinal, extra);
+                            boolean success = result != null && "success".equalsIgnoreCase(result.getStatus());
+                            if (success) successCount++; else failedCount++;
+                            if (result != null && result.getDurationMs() != null) totalDuration += result.getDurationMs();
+                            java.util.Map<String, Object> item = new java.util.HashMap<>();
+                            item.put("caseId", cid);
+                            item.put("status", result != null ? result.getStatus() : "failed");
+                            item.put("durationMs", result != null ? result.getDurationMs() : null);
+                            item.put("reportId", result != null ? result.getReportId() : null);
+                            TestCase tc = caseMap.get(cid);
+                            if (tc != null) {
+                                item.put("caseName", tc.getName());
+                                item.put("caseType", tc.getType());
+                            }
+                            items.add(item);
+                            if (planSummaryReportId == null && result != null && result.getReportId() != null) {
+                                planSummaryReportId = result.getReportId();
+                            }
+                            if (result != null && result.getExtractedVars() != null && !result.getExtractedVars().isEmpty()) {
+                                planVars.putAll(result.getExtractedVars());
+                            }
+                        } else if ("IF".equalsIgnoreCase(type)) {
+                            Object condObj = step.get("condition");
+                            boolean ok = false;
+                            if (condObj instanceof java.util.Map) {
+                                @SuppressWarnings("unchecked")
+                                java.util.Map<String, Object> cm = (java.util.Map<String, Object>) condObj;
+                                Object vne = cm.get("varNotEmpty");
+                                if (vne != null) {
+                                    String key = vne.toString();
+                                    String val = planVars.get(key);
+                                    ok = val != null && !val.trim().isEmpty();
+                                }
+                            }
+                            java.util.List<?> branch = null;
+                            if (ok) {
+                                Object thenObj = step.get("then");
+                                if (thenObj instanceof java.util.List) branch = (java.util.List<?>) thenObj;
+                            } else {
+                                Object elseObj = step.get("else");
+                                if (elseObj instanceof java.util.List) branch = (java.util.List<?>) elseObj;
+                            }
+                            if (branch != null) {
+                                for (Object sub : branch) {
+                                    if (!(sub instanceof java.util.Map)) continue;
+                                    @SuppressWarnings("unchecked")
+                                    java.util.Map<String, Object> subStep = (java.util.Map<String, Object>) sub;
+                                    java.util.List<Object> only = new java.util.ArrayList<>();
+                                    only.add(subStep);
+                                    String one = objectMapper.writeValueAsString(only);
+                                    plan.setFlowJson(one);
+                                    return execute(id, 1);
+                                }
+                            }
+                        } else if ("FOREACH".equalsIgnoreCase(type)) {
+                            String listVar = step.get("listVar") != null ? step.get("listVar").toString() : null;
+                            String itemVar = step.get("itemVar") != null ? step.get("itemVar").toString() : "item";
+                            Object stepObj = step.get("step");
+                            if (listVar != null && stepObj instanceof java.util.Map) {
+                                String raw = planVars.get(listVar);
+                                java.util.List<?> arr = null;
+                                try { arr = objectMapper.readValue(raw, java.util.List.class); } catch (Exception ignored) {}
+                                if (arr == null) {
+                                    if (raw != null && !raw.isEmpty()) arr = java.util.Arrays.asList(raw.split(","));
+                                }
+                                if (arr != null) {
+                                    for (Object elem : arr) {
+                                        java.util.Map<String, Object> subStep = (java.util.Map<String, Object>) stepObj;
+                                        Object cidObj = subStep.get("caseId");
+                                        if (cidObj == null) continue;
+                                        Integer cid;
+                                        try { cid = Integer.parseInt(cidObj.toString()); } catch (Exception e) { continue; }
+                                        total++;
+                                        java.util.Map<String, String> extra = new java.util.HashMap<>(planVars);
+                                        String v = elem != null ? elem.toString() : "";
+                                        extra.put(itemVar, v);
+                                        Object varsObj = subStep.get("vars");
+                                        if (varsObj instanceof java.util.Map) {
+                                            @SuppressWarnings("unchecked")
+                                            java.util.Map<String, Object> vmap = (java.util.Map<String, Object>) varsObj;
+                                            for (java.util.Map.Entry<String, Object> en : vmap.entrySet()) {
+                                                String vv = en.getValue() != null ? en.getValue().toString() : "";
+                                                for (java.util.Map.Entry<String, String> pv : extra.entrySet()) {
+                                                    String k = pv.getKey();
+                                                    String val = pv.getValue();
+                                                    vv = vv.replace("{{" + k + "}}", val != null ? val : "");
+                                                }
+                                                extra.put(en.getKey(), vv);
+                                            }
+                                        }
+                                        CaseExecuteResultDTO result = testCaseService.executeCaseByIdWithVariables(cid, executedByFinal, extra);
+                                        boolean success = result != null && "success".equalsIgnoreCase(result.getStatus());
+                                        if (success) successCount++; else failedCount++;
+                                        if (result != null && result.getDurationMs() != null) totalDuration += result.getDurationMs();
+                                        java.util.Map<String, Object> item = new java.util.HashMap<>();
+                                        item.put("caseId", cid);
+                                        item.put("status", result != null ? result.getStatus() : "failed");
+                                        item.put("durationMs", result != null ? result.getDurationMs() : null);
+                                        item.put("reportId", result != null ? result.getReportId() : null);
+                                        TestCase tc = caseMap.get(cid);
+                                        if (tc != null) {
+                                            item.put("caseName", tc.getName());
+                                            item.put("caseType", tc.getType());
+                                        }
+                                        items.add(item);
+                                        if (planSummaryReportId == null && result != null && result.getReportId() != null) {
+                                            planSummaryReportId = result.getReportId();
+                                        }
+                                        if (result != null && result.getExtractedVars() != null && !result.getExtractedVars().isEmpty()) {
+                                            planVars.putAll(result.getExtractedVars());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+        if (!hasFlow && concurrency == 1) {
+            for (Integer caseId : caseIds) {
+                if (caseId == null || caseId <= 0) {
+                    continue;
+                }
+                total++;
+                CaseExecuteResultDTO result = testCaseService.executeCaseByIdWithVariables(caseId, executedByFinal, planVars);
+                boolean success = result != null && "success".equalsIgnoreCase(result.getStatus());
+                if (success) {
+                    successCount++;
+                } else {
+                    failedCount++;
+                }
+                if (result != null && result.getDurationMs() != null) {
+                    totalDuration += result.getDurationMs();
+                }
+                Map<String, Object> item = new HashMap<>();
+                item.put("caseId", caseId);
+                item.put("status", result != null ? result.getStatus() : "failed");
+                item.put("durationMs", result != null ? result.getDurationMs() : null);
+                item.put("reportId", result != null ? result.getReportId() : null);
+                if (planSummaryReportId == null && result != null && result.getReportId() != null) {
+                    planSummaryReportId = result.getReportId();
+                }
+                TestCase tc = caseMap.get(caseId);
+                if (tc != null) {
+                    item.put("caseName", tc.getName());
+                    item.put("caseType", tc.getType());
+                }
+                items.add(item);
+                if (result != null && result.getExtractedVars() != null && !result.getExtractedVars().isEmpty()) {
+                    planVars.putAll(result.getExtractedVars());
+                }
             }
-            total++;
-            CaseExecuteResultDTO result = testCaseService.executeCaseById(caseId, executedBy, id, currentRunNo);
-            boolean success = result != null && "success".equalsIgnoreCase(result.getStatus());
-            if (success) {
-                successCount++;
-            } else {
-                failedCount++;
+        } else if (!hasFlow) {
+            java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(Math.max(1, concurrency));
+            java.util.List<java.util.concurrent.Future<Map<String, Object>>> futures = new java.util.ArrayList<>();
+            for (Integer caseId : caseIds) {
+                if (caseId == null || caseId <= 0) continue;
+                total++;
+                final Integer cid = caseId;
+                futures.add(pool.submit(() -> {
+                    CaseExecuteResultDTO result = testCaseService.executeCaseByIdWithVariables(cid, executedByFinal, planVars);
+                    Map<String, Object> item = new HashMap<>();
+                    item.put("caseId", cid);
+                    item.put("status", result != null ? result.getStatus() : "failed");
+                    item.put("durationMs", result != null ? result.getDurationMs() : null);
+                    item.put("reportId", result != null ? result.getReportId() : null);
+                    TestCase tc = caseMap.get(cid);
+                    if (tc != null) {
+                        item.put("caseName", tc.getName());
+                        item.put("caseType", tc.getType());
+                    }
+                    synchronized (planVars) {
+                        if (result != null && result.getExtractedVars() != null && !result.getExtractedVars().isEmpty()) {
+                            planVars.putAll(result.getExtractedVars());
+                        }
+                    }
+                    return item;
+                }));
             }
-            if (result != null && result.getDurationMs() != null) {
-                totalDuration += result.getDurationMs();
+            pool.shutdown();
+            for (java.util.concurrent.Future<Map<String, Object>> f : futures) {
+                try {
+                    Map<String, Object> item = f.get();
+                    items.add(item);
+                    Object status = item.get("status");
+                    if ("success".equals(String.valueOf(status))) {
+                        successCount++;
+                    } else {
+                        failedCount++;
+                    }
+                    Object dur = item.get("durationMs");
+                    if (dur instanceof Number) {
+                        totalDuration += ((Number) dur).longValue();
+                    }
+                    Object rid = item.get("reportId");
+                    if (planSummaryReportId == null && rid instanceof Number) {
+                        planSummaryReportId = ((Number) rid).intValue();
+                    }
+                } catch (Exception ignored) {}
             }
-            Map<String, Object> item = new HashMap<>();
-            item.put("caseId", caseId);
-            item.put("status", result != null ? result.getStatus() : "failed");
-            item.put("durationMs", result != null ? result.getDurationMs() : null);
-            item.put("reportId", result != null ? result.getReportId() : null);
-            if (planSummaryReportId == null && result != null && result.getReportId() != null) {
-                planSummaryReportId = result.getReportId();
-            }
-            TestCase tc = caseMap.get(caseId);
-            if (tc != null) {
-                item.put("caseName", tc.getName());
-                item.put("caseType", tc.getType());
-            }
-            items.add(item);
         }
 
         Map<String, Object> summary = new HashMap<>();
@@ -293,6 +538,8 @@ public class TestPlanController {
         } else {
             summary.put("executedBy", "System");
         }
+        summary.put("concurrencyApplied", concurrency);
+        summary.put("uiCasePresent", containsUiCase);
         summary.put("total", total);
         summary.put("success", successCount);
         summary.put("failed", failedCount);

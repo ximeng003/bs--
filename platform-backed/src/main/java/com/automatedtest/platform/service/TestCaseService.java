@@ -13,4 +13,6 @@ public interface TestCaseService extends IService<TestCase> {
     CaseExecuteResultDTO executeCaseById(Integer id, String executedBy);
     CaseExecuteResultDTO executeCaseById(Integer id, String executedBy, Integer planId);
     CaseExecuteResultDTO executeCaseById(Integer id, String executedBy, Integer planId, Integer planRunNo);
+    CaseExecuteResultDTO executeCaseById(Integer id, String executedBy, Integer planId, Integer planRunNo, String triggerType);
+    CaseExecuteResultDTO executeCaseByIdWithVariables(Integer id, String executedBy, java.util.Map<String, String> variables);
 }

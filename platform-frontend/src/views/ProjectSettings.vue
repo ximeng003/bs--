@@ -171,6 +171,11 @@ const handleActivateEnv = (env: Environment) => {
       await fetchEnvironments()
       await applyActiveUniqueness(env.id)
       await fetchEnvironments()
+      
+      // Save to localStorage for instant variable substitution
+      localStorage.setItem('baseUrl', env.baseUrl)
+      localStorage.setItem('currentEnvironment', env.keyName)
+      
       showToast('环境已切换', 'success')
     } catch (e: any) {
       showToast(e.message || '切换失败', 'error')

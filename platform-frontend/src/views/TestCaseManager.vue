@@ -8,7 +8,7 @@ import Badge from '@/components/ui/badge/Badge.vue'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import Label from '@/components/ui/label/Label.vue'
-import { Search, Pencil, Trash2, Play, Code, Loader2 } from 'lucide-vue-next'
+import { Search, Pencil, Trash2, Play, Code, Loader2, Square } from 'lucide-vue-next'
 import request from '@/api/request'
 import { showToast, openConfirm } from '@/lib/notify'
 import Switch from '@/components/ui/switch/Switch.vue'
@@ -115,6 +115,9 @@ const formatEnvironment = (env: string) => {
 
 const simplifyError = (raw: string | undefined | null): string => {
   if (!raw) return '执行失败'
+  if (raw.includes('【驱动版本不匹配】')) {
+    return raw.split('\n')[0]
+  }
   if (/invalid payload/i.test(raw)) {
     return '执行引擎收到的 JSON 格式不合法，请检查请求 Body 格式'
   }
@@ -193,8 +196,9 @@ const fetchTestCases = async () => {
       testCases.value = []
     }
     selectedCaseIds.value = []
-  } catch (e) {
+  } catch (e: any) {
     console.error('Failed to fetch test cases', e)
+    showToast(e.message || '获取用例列表失败', 'error')
   } finally {
     loading.value = false
   }
@@ -348,6 +352,17 @@ const handleRun = async (id: string) => {
   }
 }
 
+const handleStop = async (id: string) => {
+  try {
+    await request.post(`/testcases/${id}/stop`)
+    showToast('停止成功！', 'success')
+    executingCaseId.value = null
+    await fetchTestCases()
+  } catch (e: any) {
+    showToast(e.message || '停止失败', 'error')
+  }
+}
+
 const navigateToEditor = (id: string, type: string) => {
     if (type === 'API') {
         router.push(`/api-cases/edit/${id}`)
@@ -374,7 +389,15 @@ const handleCode = (id: string) => {
 const handleSaveEdit = async () => {
     if (!editingCase.value) return
     try {
-        await request.put('/testcases', editingCase.value)
+        const payload = {
+          id: editingCase.value.id,
+          name: editingCase.value.name,
+          type: editingCase.value.type,
+          description: editingCase.value.description,
+          environment: editingCase.value.environment,
+          status: editingCase.value.status
+        }
+        await request.put('/testcases', payload)
         editDialogOpen.value = false
         fetchTestCases()
         showToast('保存成功', 'success')
@@ -542,7 +565,7 @@ const getTypeBadgeClass = (type: string) => {
               </div>
               <div class="flex items-center gap-2 shrink-0" v-if="logDialogTab==='logs'">
                 <div class="flex items-center gap-1 text-xs text-gray-600">
-                  <Switch v-model:checked="stepsOnly" />
+                  <Switch v-model="stepsOnly" />
                   <span>仅步骤</span>
                 </div>
                 <Input v-model="logSearch" placeholder="搜索日志/步骤" class="h-8 w-36 sm:w-44" />
@@ -776,14 +799,23 @@ const getTypeBadgeClass = (type: string) => {
 
             <div class="flex items-center gap-2">
               <Button 
+                v-if="executingCaseId === testCase.id || testCase.lastResult === 'running'"
+                variant="ghost" 
+                size="icon" 
+                class="text-red-600 hover:text-red-700 hover:bg-red-50" 
+                @click="handleStop(testCase.id)"
+                title="停止执行"
+              >
+                <Square class="w-4 h-4" />
+              </Button>
+              <Button 
+                v-else
                 variant="ghost" 
                 size="icon" 
                 class="text-green-600 hover:text-green-700 hover:bg-green-50" 
                 @click="handleRun(testCase.id)"
-                :disabled="executingCaseId === testCase.id || testCase.lastResult === 'running'"
               >
-                <Loader2 v-if="executingCaseId === testCase.id || testCase.lastResult === 'running'" class="w-4 h-4 animate-spin" />
-                <Play v-else class="w-4 h-4" />
+                <Play class="w-4 h-4" />
               </Button>
               <Button variant="ghost" size="sm" class="text-amber-600 hover:text-amber-700 hover:bg-amber-50" @click="openDdtDialog(testCase.id)">
                 批量执行

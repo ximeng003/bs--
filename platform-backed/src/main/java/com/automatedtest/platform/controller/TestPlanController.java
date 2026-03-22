@@ -326,7 +326,7 @@ public class TestPlanController {
                                     extra.put(en.getKey(), vv);
                                 }
                             }
-                            CaseExecuteResultDTO result = testCaseService.executeCaseByIdWithVariables(cid, executedByFinal, extra);
+                            CaseExecuteResultDTO result = testCaseService.executeCaseById(cid, executedByFinal, id, currentRunNo, triggerType);
                             boolean success = result != null && "success".equalsIgnoreCase(result.getStatus());
                             if (success) successCount++; else failedCount++;
                             if (result != null && result.getDurationMs() != null) totalDuration += result.getDurationMs();
@@ -416,7 +416,7 @@ public class TestPlanController {
                                                 extra.put(en.getKey(), vv);
                                             }
                                         }
-                                        CaseExecuteResultDTO result = testCaseService.executeCaseByIdWithVariables(cid, executedByFinal, extra);
+                                        CaseExecuteResultDTO result = testCaseService.executeCaseById(cid, executedByFinal, id, currentRunNo, triggerType);
                                         boolean success = result != null && "success".equalsIgnoreCase(result.getStatus());
                                         if (success) successCount++; else failedCount++;
                                         if (result != null && result.getDurationMs() != null) totalDuration += result.getDurationMs();
@@ -451,7 +451,7 @@ public class TestPlanController {
                     continue;
                 }
                 total++;
-                CaseExecuteResultDTO result = testCaseService.executeCaseByIdWithVariables(caseId, executedByFinal, planVars);
+                CaseExecuteResultDTO result = testCaseService.executeCaseById(caseId, executedByFinal, id, currentRunNo, triggerType);
                 boolean success = result != null && "success".equalsIgnoreCase(result.getStatus());
                 if (success) {
                     successCount++;
@@ -486,8 +486,9 @@ public class TestPlanController {
                 if (caseId == null || caseId <= 0) continue;
                 total++;
                 final Integer cid = caseId;
+                final String tt = triggerType;
                 futures.add(pool.submit(() -> {
-                    CaseExecuteResultDTO result = testCaseService.executeCaseByIdWithVariables(cid, executedByFinal, planVars);
+                    CaseExecuteResultDTO result = testCaseService.executeCaseById(cid, executedByFinal, id, currentRunNo, tt);
                     Map<String, Object> item = new HashMap<>();
                     item.put("caseId", cid);
                     item.put("status", result != null ? result.getStatus() : "failed");

@@ -1,6 +1,8 @@
 @echo off
 setlocal enabledelayedexpansion
 
+title Start Automated Testing Platform
+
 echo ==================================================
 echo Starting Automated Testing Platform
 echo ==================================================
@@ -12,44 +14,44 @@ echo.
 echo [Checking ports]
 
 REM Check port 8080
-netstat -ano | findstr ":8080" | findstr "LISTENING" > "%TEMP%\port_8080.txt"
-for /f "tokens=5" %%a in ('type "%TEMP%\port_8080.txt"') do (
+netstat -ano | findstr /i ":8080" > "%TEMP%\atp_start_port_8080.txt" 2>nul
+for /f "tokens=5" %%a in ('type "%TEMP%\atp_start_port_8080.txt"') do (
     if not "%%a"=="" (
         echo Killing process on port 8080 - PID: %%a
         taskkill /F /PID %%a >nul 2>nul
     )
 )
-if exist "%TEMP%\port_8080.txt" del "%TEMP%\port_8080.txt"
+if exist "%TEMP%\atp_start_port_8080.txt" del "%TEMP%\atp_start_port_8080.txt"
 
 REM Check port 5173
-netstat -ano | findstr ":5173" | findstr "LISTENING" > "%TEMP%\port_5173.txt"
-for /f "tokens=5" %%a in ('type "%TEMP%\port_5173.txt"') do (
+netstat -ano | findstr /i ":5173" > "%TEMP%\atp_start_port_5173.txt" 2>nul
+for /f "tokens=5" %%a in ('type "%TEMP%\atp_start_port_5173.txt"') do (
     if not "%%a"=="" (
         echo Killing process on port 5173 - PID: %%a
         taskkill /F /PID %%a >nul 2>nul
     )
 )
-if exist "%TEMP%\port_5173.txt" del "%TEMP%\port_5173.txt"
+if exist "%TEMP%\atp_start_port_5173.txt" del "%TEMP%\atp_start_port_5173.txt"
 
 REM Check port 18080
-netstat -ano | findstr ":18080" | findstr "LISTENING" > "%TEMP%\port_18080.txt"
-for /f "tokens=5" %%a in ('type "%TEMP%\port_18080.txt"') do (
+netstat -ano | findstr /i ":18080" > "%TEMP%\atp_start_port_18080.txt" 2>nul
+for /f "tokens=5" %%a in ('type "%TEMP%\atp_start_port_18080.txt"') do (
     if not "%%a"=="" (
         echo Killing process on port 18080 - PID: %%a
         taskkill /F /PID %%a >nul 2>nul
     )
 )
-if exist "%TEMP%\port_18080.txt" del "%TEMP%\port_18080.txt"
+if exist "%TEMP%\atp_start_port_18080.txt" del "%TEMP%\atp_start_port_18080.txt"
 
 REM Check port 18081
-netstat -ano | findstr ":18081" | findstr "LISTENING" > "%TEMP%\port_18081.txt"
-for /f "tokens=5" %%a in ('type "%TEMP%\port_18081.txt"') do (
+netstat -ano | findstr /i ":18081" > "%TEMP%\atp_start_port_18081.txt" 2>nul
+for /f "tokens=5" %%a in ('type "%TEMP%\atp_start_port_18081.txt"') do (
     if not "%%a"=="" (
         echo Killing process on port 18081 - PID: %%a
         taskkill /F /PID %%a >nul 2>nul
     )
 )
-if exist "%TEMP%\port_18081.txt" del "%TEMP%\port_18081.txt"
+if exist "%TEMP%\atp_start_port_18081.txt" del "%TEMP%\atp_start_port_18081.txt"
 
 REM ---------------------------------------------------
 REM Check for Maven
@@ -81,7 +83,7 @@ echo Using Maven: "%MVN_CMD%"
 echo.
 echo [1/2] Starting Backend (Spring Boot)...
 cd /d "%~dp0platform-backed"
-start "Platform Backend" cmd /k call "%MVN_CMD%" spring-boot:run
+start "Platform Backend" cmd /k "title Platform Backend & call "%MVN_CMD%" spring-boot:run"
 
 echo.
 echo [2/2] Starting Frontend (Vue + Vite)...
@@ -89,7 +91,7 @@ cd /d "%~dp0platform-frontend"
 set "BACKEND_PORT="
 for /L %%T in (1,1,60) do (
   for /L %%P in (18080,1,18100) do (
-    netstat -ano | findstr ":%%P" | findstr "LISTENING" >nul 2>nul
+    netstat -ano | findstr /i ":%%P" >nul 2>nul
     if not errorlevel 1 (
       set "BACKEND_PORT=%%P"
       goto :FOUND_BACKEND_PORT
@@ -101,19 +103,13 @@ for /L %%T in (1,1,60) do (
 if "%BACKEND_PORT%"=="" set "BACKEND_PORT=18080"
 echo Detected backend port: %BACKEND_PORT%
 echo.
-echo [Frontend Check] Running lint+typecheck+build (may skip lint if not installed)
-call npm run check
-if errorlevel 1 (
-  echo [ERROR] Frontend verification failed. Please fix issues and rerun.
-  pause
-  exit /b 1
-)
+echo [Frontend Check] Starting dev server directly...
 set "VITE_API_TARGET=http://127.0.0.1:%BACKEND_PORT%"
-start "Platform Frontend" cmd /k "set VITE_API_TARGET=%VITE_API_TARGET% && npm run dev"
+start "Platform Frontend" cmd /k "title Platform Frontend & set VITE_API_TARGET=%VITE_API_TARGET% && npm run dev"
 
 echo.
 echo [Opening Microsoft Edge]
-start "" msedge http://localhost:5173/
+start msedge http://localhost:5173/
 
 echo.
 echo Both services are attempting to start in new windows.

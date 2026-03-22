@@ -87,6 +87,19 @@ public class TestCaseController {
         String executedBy = user != null ? user.getUsername() : "Project API Key";
         return Result.success(testCaseService.executeCaseById(id, executedBy));
     }
+
+    @PostMapping("/{id}/stop")
+    @OperationAudit(module = "TestCase", operation = "Stop Test Case Execution")
+    public Result<Boolean> stop(@PathVariable Integer id) {
+        TestCase testCase = testCaseService.getById(id);
+        if (testCase == null) {
+            return Result.error("停止失败：测试用例不存在");
+        }
+        
+        // Relax project context check for STOP action to allow recovery if UI state is inconsistent
+        testCaseService.stop(id);
+        return Result.success(true);
+    }
     
     @PostMapping("/{id}/execute-batch")
     @OperationAudit(module = "TestCase", operation = "Execute Test Case Batch")

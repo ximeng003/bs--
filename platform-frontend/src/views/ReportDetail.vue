@@ -6,6 +6,14 @@ import { generateReportHtml } from '@/utils/exportReport'
 import { Card, CardContent } from '@/components/ui/card'
 import Badge from '@/components/ui/badge/Badge.vue'
 import Button from '@/components/ui/button/Button.vue'
+import { Input } from '@/components/ui/input'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { CheckCircle, XCircle, Clock, Download, Share2, AlertCircle, FileText } from 'lucide-vue-next'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
@@ -262,18 +270,18 @@ function applyStepStatuses(
   const executed = Math.max(0, Math.min(executedCount, total))
   const failIndex = executed < total ? executed : total - 1
   return steps.map((s, idx) => {
-    if (idx < executed) {
-      return {
-        ...s,
-        status: 'success',
-        error: false
-      }
-    }
     if (idx === failIndex) {
       return {
         ...s,
         status: 'failed',
         error: true
+      }
+    }
+    if (idx < executed) {
+      return {
+        ...s,
+        status: 'success',
+        error: false
       }
     }
     return {
@@ -539,7 +547,12 @@ const executionSteps = computed<ExecutionStep[]>(() => {
   const caseType = (tc?.type || r?.caseType || '').toUpperCase()
   const status = (r?.status || '').toLowerCase()
   const isSuccess = status === 'success'
-  const executedCount = logLines.value.length
+  
+  // 优化：仅统计真正的步骤执行日志，而非所有日志行数
+  const stepLogLines = logLines.value.filter(l => 
+    /\[步骤\s*\d+\]|click ok|input ok|wait ok|screenshot ok|launch ok|close ok|assert_exists ok|back ok/i.test(l)
+  )
+  const executedCount = stepLogLines.length
 
   if (caseType === 'API') {
     const content = parsedCaseContent.value
@@ -784,15 +797,21 @@ const fetchAndProcessItem = async (item: PlanItemForReport) => {
     // 4. 构建步骤 (复用组件内的逻辑)
     const isSuccess = (reportDetail.status || '').toLowerCase() === 'success'
     const type = (testCaseType || '').toUpperCase()
+    
+    // 优化：仅统计真正的步骤执行日志
+    const stepExecutedCount = logLines.filter(l => 
+      /\[步骤\s*\d+\]|click ok|input ok|wait ok|screenshot ok|launch ok|close ok|assert_exists ok|back ok/i.test(l)
+    ).length
+    
     let steps: ExecutionStep[] = []
     
     if (type === 'API') {
       const errorText = logLines.find((line) => /assert/i.test(line)) || ''
       steps = buildApiSteps(testCaseContent, isSuccess, errorText)
     } else if (type === 'WEB') {
-      steps = buildWebSteps(testCaseContent, logLines.length, isSuccess)
+      steps = buildWebSteps(testCaseContent, stepExecutedCount, isSuccess)
     } else if (type === 'APP') {
-      steps = buildAppSteps(testCaseContent, logLines.length, isSuccess)
+      steps = buildAppSteps(testCaseContent, stepExecutedCount, isSuccess)
     } else {
       // Fallback steps from logs
       steps = logLines.map((msg, idx) => ({
@@ -1018,15 +1037,20 @@ const handleExport = async () => {
 const handleShare = async () => {
   try {
     const idStr = route.params.id as string
-    const res: any = await request.post(`/reports/${idStr}/share`, { hours: 24 })
-    const token = res?.token || res?.data?.token || ''
+    const res: any = await request.post(`/reports/${idStr}/share`, null, { 
+      params: { hours: 24 } 
+    })
+    console.log('Share API response:', res)
+    const token = res?.token || res?.data?.token || (typeof res === 'string' ? res : '')
     if (!token) {
       showToast('生成分享链接失败', 'error')
       return
     }
     const url = `${window.location.origin}/api/public/share/report?token=${encodeURIComponent(token)}`
+    console.log('Generated share URL:', url)
     shareLink.value = url
     shareDialogOpen.value = true
+    showToast('分享链接已生成', 'success')
   } catch (e) {
     console.error('Generate share failed:', e)
     showToast('生成分享链接失败', 'error')
@@ -1541,8 +1565,11 @@ const copyShareLink = async () => {
       <div class="space-y-3">
         <div class="text-sm text-gray-600">链接：</div>
         <div class="flex items-center gap-2">
-          <Input :value="shareLink" readonly class="flex-1" />
-          <Button variant="outline" @click="copyShareLink">复制</Button>
+          <Input v-model="shareLink" readonly class="flex-1" />
+          <Button variant="outline" @click="copyShareLink">
+            <Copy class="w-4 h-4 mr-2" />
+            复制
+          </Button>
         </div>
         <div class="flex justify-end">
           <Button variant="outline" @click="shareDialogOpen = false">关闭</Button>

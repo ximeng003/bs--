@@ -60,140 +60,20 @@ public class TestReportController {
     }
 
     @GetMapping
-    public Result<IPage<TestReport>> list(@RequestParam(defaultValue = "1") Integer page,
-                                          @RequestParam(defaultValue = "10") Integer size,
-                                          @RequestParam(required = false) String status,
-                                          @RequestParam(required = false) String keyword,
-                                          @RequestParam(required = false) String date,
-                                          @RequestParam(required = false) Integer planId,
-                                          @RequestParam(required = false, name = "planRunNo") Integer planRunNo) {
-        Page<TestReport> pageParam = new Page<>(page, size);
-        QueryWrapper<TestReport> queryWrapper = new QueryWrapper<>();
+    public Result<IPage<TestReport>> list(
+            @RequestParam(defaultValue = "1") Integer page,
+            @RequestParam(defaultValue = "10") Integer size,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) String date) {
         
-        User user = UserContext.getCurrentUser();
         Integer projectId = UserContext.getCurrentProjectId();
-
-        boolean isAdmin = user != null && "admin".equalsIgnoreCase(user.getRole());
-
-        if (projectId != null) {
-            queryWrapper.eq("project_id", projectId);
-        } else {
-            // No project ID provided. Only admin can see all.
-            if (!isAdmin) {
-                 return Result.error("Project ID is required");
-            }
+        if (projectId == null) {
+            return Result.error("项目上下文无效");
         }
 
-        if (StringUtils.hasText(status) && !"all".equalsIgnoreCase(status)) {
-            queryWrapper.eq("status", status);
-        }
-
-        if (planId != null && planId > 0) {
-            queryWrapper.eq("plan_id", planId);
-        }
-
-        if (planRunNo != null && planRunNo > 0) {
-            queryWrapper.eq("plan_run_no", planRunNo);
-        }
-        
-        if (StringUtils.hasText(keyword)) {
-            String kw = keyword.trim();
-            queryWrapper.and(wrapper -> {
-                wrapper.like("logs", kw).or().eq("id", kw);
-                
-                // Search for matching test cases
-                QueryWrapper<TestCase> caseQuery = new QueryWrapper<>();
-                caseQuery.like("name", kw);
-                if (projectId != null) caseQuery.eq("project_id", projectId);
-                List<TestCase> cases = testCaseService.list(caseQuery);
-                if (cases != null && !cases.isEmpty()) {
-                    List<Integer> ids = cases.stream().map(TestCase::getId).collect(java.util.stream.Collectors.toList());
-                    wrapper.or().in("case_id", ids);
-                }
-                
-                // Search for matching test plans
-                QueryWrapper<TestPlan> planQuery = new QueryWrapper<>();
-                planQuery.like("name", kw);
-                if (projectId != null) planQuery.eq("project_id", projectId);
-                List<TestPlan> plans = testPlanService.list(planQuery);
-                if (plans != null && !plans.isEmpty()) {
-                    List<Integer> ids = plans.stream().map(TestPlan::getId).collect(java.util.stream.Collectors.toList());
-                    wrapper.or().in("plan_id", ids);
-                }
-            });
-        }
-
-        if (StringUtils.hasText(date)) {
-            try {
-                LocalDate localDate = LocalDate.parse(date);
-                LocalDateTime start = localDate.atStartOfDay();
-                LocalDateTime end = localDate.plusDays(1).atStartOfDay();
-                queryWrapper.ge("executed_at", start);
-                queryWrapper.lt("executed_at", end);
-            } catch (Exception ignored) {
-            }
-        }
-        
-        queryWrapper.orderByDesc("executed_at");
-        queryWrapper.orderByDesc("id");
-
-        IPage<TestReport> pageResult = testReportService.page(pageParam, queryWrapper);
-
-        if (pageResult.getRecords() != null && !pageResult.getRecords().isEmpty()) {
-            java.util.List<TestReport> records = pageResult.getRecords();
-            java.util.Set<Integer> caseIds = new java.util.HashSet<>();
-            java.util.Set<Integer> planIds = new java.util.HashSet<>();
-            for (TestReport r : records) {
-                if (r.getCaseId() != null) {
-                    caseIds.add(r.getCaseId());
-                }
-                if (r.getPlanId() != null) {
-                    planIds.add(r.getPlanId());
-                }
-            }
-            java.util.Map<Integer, TestCase> caseMap = new java.util.HashMap<>();
-            if (!caseIds.isEmpty()) {
-                java.util.List<TestCase> cases = testCaseService.listByIds(caseIds);
-                for (TestCase c : cases) {
-                    if (c.getId() != null) {
-                        caseMap.put(c.getId(), c);
-                    }
-                }
-            }
-            java.util.Map<Integer, TestPlan> planMap = new java.util.HashMap<>();
-            if (!planIds.isEmpty()) {
-                java.util.List<TestPlan> plans = testPlanService.listByIds(planIds);
-                for (TestPlan p : plans) {
-                    if (p.getId() != null) {
-                        planMap.put(p.getId(), p);
-                    }
-                }
-            }
-            for (TestReport r : records) {
-                if (r.getCaseId() != null) {
-                    TestCase c = caseMap.get(r.getCaseId());
-                    if (c != null) {
-                        r.setCaseName(c.getName());
-                        r.setEnvironment(c.getEnvironment());
-                        r.setCaseType(c.getType());
-                        if (r.getExecutedAt() == null) {
-                            r.setExecutedAt(c.getLastRun());
-                        }
-                    }
-                }
-                if (r.getPlanId() != null) {
-                    TestPlan p = planMap.get(r.getPlanId());
-                    if (p != null) {
-                        r.setPlanName(p.getName());
-                        if (r.getEnvironment() == null || r.getEnvironment().isEmpty()) {
-                            r.setEnvironment(p.getEnvironment());
-                        }
-                    }
-                }
-            }
-        }
-
-        return Result.success(pageResult);
+        Page<TestReport> pageParam = new Page<>(page, size);
+        return Result.success(testReportService.listUnified(pageParam, projectId, status, keyword, date));
     }
 
     @GetMapping("/{id}")

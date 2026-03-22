@@ -149,21 +149,50 @@ def run_web(content: Dict[str, Any]) -> Dict[str, Any]:
     import os
     
     ops = Options()
-    ops.add_argument("--headless=new")
+    headless = content.get("headless")
+    if headless is None:
+        headless = True
+    headless_flag = bool(headless)
+    if headless_flag:
+        ops.add_argument("--headless=new")
     ops.add_argument("--disable-gpu")
     ops.add_argument("--no-sandbox")
     ops.add_argument("--window-size=1280,800")
     
     driver = None
     logs_note = []
+    logs_note.append(f"headless: {headless_flag}")
+    
+    # Check for user-provided driver path in content (optional)
+    user_driver_path = content.get("driverPath") or content.get("driver_path")
+    
     try:
-        # 1) Try Selenium Manager (no executable_path) — best for version matching
-        _sink = io.StringIO()
-        with contextlib.redirect_stdout(_sink), contextlib.redirect_stderr(_sink):
-            service = EdgeService()  # Selenium >=4.6 will download a compatible driver
+        if user_driver_path and os.path.exists(user_driver_path):
+            service = EdgeService(executable_path=user_driver_path)
             driver = EdgeDriver(service=service, options=ops)
-        logs_note.append("driver: selenium-manager")
+            logs_note.append(f"driver: user-provided ({user_driver_path})")
+        else:
+            # 1) Try Selenium Manager (no executable_path) — best for version matching
+            _sink = io.StringIO()
+            with contextlib.redirect_stdout(_sink), contextlib.redirect_stderr(_sink):
+                service = EdgeService()  # Selenium >=4.6 will download a compatible driver
+                driver = EdgeDriver(service=service, options=ops)
+            logs_note.append("driver: selenium-manager")
     except Exception as e1:
+        # Try to clean selenium cache if it contains an old incompatible driver
+        if "session not created" in str(e1).lower():
+            try:
+                cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "selenium")
+                if os.path.exists(cache_dir):
+                    import shutil
+                    # Only log, don't delete everything blindly, but we could target msedgedriver
+                    ms_cache = os.path.join(cache_dir, "msedgedriver")
+                    if os.path.exists(ms_cache):
+                        shutil.rmtree(ms_cache)
+                        logs_note.append("cleaned selenium cache for msedgedriver")
+            except Exception:
+                pass
+
         # 2) Fallback to packaged driver under engine/edgedriver_win64/msedgedriver.exe (offline)
         packaged = os.path.join(os.path.dirname(os.path.abspath(__file__)), "edgedriver_win64", "msedgedriver.exe")
         if os.path.exists(packaged):
@@ -173,8 +202,17 @@ def run_web(content: Dict[str, Any]) -> Dict[str, Any]:
                     service = EdgeService(executable_path=packaged)
                     driver = EdgeDriver(service=service, options=ops)
                 logs_note.append("driver: packaged-edgedriver")
-            except Exception:
-                # Re-raise original for clarity
+            except Exception as e2:
+                # If fallback also fails, provide a comprehensive error message
+                err_msg = str(e1)
+                if "session not created" in err_msg.lower():
+                    # Extract version mismatch info if possible
+                    import re
+                    match = re.search(r"supports Microsoft Edge version (\d+).*browser version is ([\d.]+)", err_msg)
+                    if match:
+                        v_driver = match.group(1)
+                        v_browser = match.group(2)
+                        raise Exception(f"【驱动版本不匹配】浏览器版本为 {v_browser}，但驱动仅支持 {v_driver}。由于当前环境无法自动下载驱动，请手动下载匹配的 msedgedriver.exe 并放置到 engine/edgedriver_win64/ 目录下。")
                 raise e1
         else:
             # No packaged driver, bubble up the selenium-manager error
@@ -260,6 +298,14 @@ def run_web(content: Dict[str, Any]) -> Dict[str, Any]:
             pass
         return failed(str(e), {"durationMs": duration, "logs": safe_logs})
     finally:
+        if not headless_flag:
+            try:
+                pause_ms = content.get("pauseAfterMs")
+                if pause_ms is None:
+                    pause_ms = 2000
+                time.sleep(int(pause_ms) / 1000)
+            except Exception:
+                pass
         driver.quit()
 
 def run_app(content: Dict[str, Any]) -> Dict[str, Any]:
@@ -267,6 +313,7 @@ def run_app(content: Dict[str, Any]) -> Dict[str, Any]:
     from appium.webdriver.common.appiumby import AppiumBy
     from selenium.webdriver.support.ui import WebDriverWait
     from selenium.webdriver.support import expected_conditions as EC
+    import re
     try:
         from appium.options.android import UiAutomator2Options
     except Exception:
@@ -299,78 +346,231 @@ def run_app(content: Dict[str, Any]) -> Dict[str, Any]:
         if "fullReset" in caps and "appium:fullReset" not in normalized:
             normalized["appium:fullReset"] = caps.get("fullReset")
         # Use Options API when available to avoid to_capabilities None issues
-        if UiAutomator2Options is not None:
-            opts = UiAutomator2Options()
-            try:
-                opts.load_capabilities(normalized)
-            except Exception:
-                # load_capabilities may expect dict with proper types; ensure dict
-                for k, v in normalized.items():
-                    try:
-                        opts.set_capability(k, v)
-                    except Exception:
-                        pass
-            return webdriver.Remote(remote_url, options=opts)
-        # Legacy fallback for very old client versions
-        return webdriver.Remote(remote_url, normalized)
+        try:
+            if UiAutomator2Options is not None:
+                opts = UiAutomator2Options()
+                try:
+                    opts.load_capabilities(normalized)
+                except Exception:
+                    # load_capabilities may expect dict with proper types; ensure dict
+                    for k, v in normalized.items():
+                        try:
+                            opts.set_capability(k, v)
+                        except Exception:
+                            pass
+                return webdriver.Remote(remote_url, options=opts)
+            # Legacy fallback for very old client versions
+            return webdriver.Remote(remote_url, normalized)
+        except Exception as e:
+            err_str = str(e).lower()
+            if "failed to establish a new connection" in err_str or "connection refused" in err_str or "10061" in err_str:
+                raise Exception(f"【Appium 服务未就绪】无法连接到 Appium 地址 {remote_url}。请确保已在本地启动 Appium Server (npm install -g appium; appium) 且端口正确。")
+            raise e
 
-    def find_element(driver, step: Dict[str, Any]):
+    def _by_map():
+        return {
+            "id": AppiumBy.ID,
+            "xpath": AppiumBy.XPATH,
+            "accessibility_id": AppiumBy.ACCESSIBILITY_ID,
+            "class_name": AppiumBy.CLASS_NAME,
+            "android_uiautomator": AppiumBy.ANDROID_UIAUTOMATOR,
+            "ios_predicate": AppiumBy.IOS_PREDICATE,
+            "ios_class_chain": AppiumBy.IOS_CLASS_CHAIN,
+            "css": getattr(AppiumBy, "CSS_SELECTOR", AppiumBy.XPATH),
+            "css_selector": getattr(AppiumBy, "CSS_SELECTOR", AppiumBy.XPATH),
+        }
+
+    def _get_locator(step: Dict[str, Any]):
         by = (step.get("by") or "xpath").lower()
         value = step.get("value") or step.get("selector") or step.get("xpath")
-        if not value:
+        if value is None or str(value).strip() == "":
             raise ValueError("selector is required")
-        by_map = {
-            "id": AppiumBy.ID,
-            "xpath": AppiumBy.XPATH,
-            "accessibility_id": AppiumBy.ACCESSIBILITY_ID,
-            "class_name": AppiumBy.CLASS_NAME,
-            "android_uiautomator": AppiumBy.ANDROID_UIAUTOMATOR,
-            "ios_predicate": AppiumBy.IOS_PREDICATE,
-            "ios_class_chain": AppiumBy.IOS_CLASS_CHAIN
-        }
-        return driver.find_element(by_map.get(by, AppiumBy.XPATH), value)
+        return by, str(value)
 
-    def wait_element(driver, step: Dict[str, Any], timeout_ms: int):
-        by = (step.get("by") or "xpath").lower()
+    def _find_once(driver, by: str, value: str):
+        m = _by_map()
+        return driver.find_element(m.get(by, AppiumBy.XPATH), value)
+
+    def _find_with_wait(driver, by: str, value: str, timeout_ms: int):
+        ms = int(timeout_ms or 0)
+        if ms <= 0:
+            return _find_once(driver, by, value)
+        end = time.time() + (ms / 1000.0)
+        last_err = None
+        while True:
+            try:
+                return _find_once(driver, by, value)
+            except Exception as e:
+                last_err = e
+                if time.time() >= end:
+                    raise last_err
+                time.sleep(0.25)
+
+    def find_element(driver, step: Dict[str, Any], timeout_ms: int = 0, logs_out=None):
+        attempts = []
+        by, value = _get_locator(step)
+        attempts.append((by, value))
+        try:
+            return _find_with_wait(driver, by, value, timeout_ms)
+        except Exception as e1:
+            if platform_name == "android":
+                def _try_scroll_once(hint: str, mode: str):
+                    if hint is None:
+                        return False
+                    txt = str(hint)
+                    if txt.strip() == "":
+                        return False
+                    escaped = txt.replace("\\", "\\\\").replace('"', '\\"')
+                    if logs_out is not None:
+                        logs_out.append(f"scroll_try {mode}Contains={txt}")
+                    exprs = []
+                    if mode == "text":
+                        exprs.append(f'new UiScrollable(new UiSelector().scrollable(true)).scrollIntoView(new UiSelector().textContains("{escaped}"))')
+                        exprs.append(f'new UiScrollable(new UiSelector().scrollable(true).instance(0)).scrollIntoView(new UiSelector().textContains("{escaped}"))')
+                    else:
+                        exprs.append(f'new UiScrollable(new UiSelector().scrollable(true)).scrollIntoView(new UiSelector().descriptionContains("{escaped}"))')
+                        exprs.append(f'new UiScrollable(new UiSelector().scrollable(true).instance(0)).scrollIntoView(new UiSelector().descriptionContains("{escaped}"))')
+                    for expr in exprs:
+                        try:
+                            _ = driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, expr)
+                            if logs_out is not None:
+                                logs_out.append(f"scroll_ok {mode}Contains={txt}")
+                            return True
+                        except Exception:
+                            continue
+                    if logs_out is not None:
+                        logs_out.append(f"scroll_failed {mode}Contains={txt}")
+                    return False
+
+                def _extract_hint_from_xpath(xp: str):
+                    s = str(xp)
+                    m = re.search(r"contains\(\s*@text\s*,\s*'([^']+)'\s*\)", s)
+                    if m:
+                        return ("text", m.group(1))
+                    m = re.search(r"contains\(\s*@content-desc\s*,\s*'([^']+)'\s*\)", s)
+                    if m:
+                        return ("desc", m.group(1))
+                    m = re.search(r"@text\s*=\s*'([^']+)'", s)
+                    if m:
+                        return ("text", m.group(1))
+                    m = re.search(r"@content-desc\s*=\s*'([^']+)'", s)
+                    if m:
+                        return ("desc", m.group(1))
+                    return (None, None)
+
+                if by == "xpath":
+                    mode, hint = _extract_hint_from_xpath(value)
+                    if mode is not None:
+                        if _try_scroll_once(hint, "text" if mode == "text" else "desc"):
+                            try:
+                                return _find_with_wait(driver, by, value, timeout_ms)
+                            except Exception:
+                                pass
+                        try:
+                            escaped = str(hint).replace("\\", "\\\\").replace('"', '\\"')
+                            if mode == "text":
+                                uia = f'new UiSelector().textContains("{escaped}")'
+                            else:
+                                uia = f'new UiSelector().descriptionContains("{escaped}")'
+                            attempts.append(("android_uiautomator", uia))
+                            if logs_out is not None:
+                                logs_out.append(f"uia_try {uia}")
+                            return _find_with_wait(driver, "android_uiautomator", uia, timeout_ms)
+                        except Exception:
+                            pass
+            fallbacks = step.get("fallbacks") or []
+            if isinstance(fallbacks, list):
+                for fb in fallbacks:
+                    if not isinstance(fb, dict):
+                        continue
+                    fb_by = (fb.get("by") or "xpath").lower()
+                    fb_val = fb.get("value") or fb.get("selector") or fb.get("xpath")
+                    if fb_val is None or str(fb_val).strip() == "":
+                        continue
+                    fb_val = str(fb_val)
+                    if fb_by == "xpath" and ("contains(text(),'//*" in fb_val or 'contains(text(),"//*' in fb_val):
+                        continue
+                    attempts.append((fb_by, fb_val))
+                    try:
+                        el = _find_with_wait(driver, fb_by, fb_val, timeout_ms)
+                        if logs_out is not None:
+                            logs_out.append(f"fallback {fb_by}={fb_val}")
+                        return el
+                    except Exception:
+                        continue
+            msg = "; ".join([f"{a}={b}" for a, b in attempts])
+            raise Exception(f"element not found (tried {msg})") from e1
+
+    def wait_element(driver, step: Dict[str, Any], timeout_ms: int, logs_out=None):
         value = step.get("value") or step.get("selector") or step.get("xpath")
-        if not value:
-            time.sleep(timeout_ms / 1000)
+        if value is None or str(value).strip() == "":
+            time.sleep(int(timeout_ms or 0) / 1000)
             return
-        by_map = {
-            "id": AppiumBy.ID,
-            "xpath": AppiumBy.XPATH,
-            "accessibility_id": AppiumBy.ACCESSIBILITY_ID,
-            "class_name": AppiumBy.CLASS_NAME,
-            "android_uiautomator": AppiumBy.ANDROID_UIAUTOMATOR,
-            "ios_predicate": AppiumBy.IOS_PREDICATE,
-            "ios_class_chain": AppiumBy.IOS_CLASS_CHAIN
-        }
-        locator = (by_map.get(by, AppiumBy.XPATH), value)
-        WebDriverWait(driver, timeout_ms / 1000).until(EC.presence_of_element_located(locator))
+        find_element(driver, step, timeout_ms=int(timeout_ms or 0), logs_out=logs_out)
+
+    def _current_context(driver):
+        pkg = None
+        act = None
+        try:
+            if hasattr(driver, "current_package"):
+                pkg = driver.current_package
+        except Exception:
+            pkg = None
+        try:
+            if hasattr(driver, "current_activity"):
+                act = driver.current_activity
+        except Exception:
+            act = None
+        if pkg is None and act is None:
+            return ""
+        if pkg is None:
+            return f"activity={act}"
+        if act is None:
+            return f"package={pkg}"
+        return f"package={pkg} activity={act}"
 
     appium_conf = content.get("appium") or {}
+    caps_for_platform = appium_conf.get("capabilities") or {}
+    platform_name = str(caps_for_platform.get("platformName") or caps_for_platform.get("platform_name") or "Android").strip().lower()
     steps = content.get("steps") or []
     start = time.time()
     logs = []
     driver = None
     try:
         driver = build_driver(appium_conf)
+        logs.append(f"steps_count={len(steps)}")
+        ctx0 = _current_context(driver)
+        if ctx0:
+            logs.append(f"ctx {ctx0}")
         for step in steps:
             action = (step.get("action") or "").lower()
             if action == "click":
-                el = find_element(driver, step)
+                by, value = _get_locator(step)
+                logs.append(f"click {by}={value}")
+                timeout_ms = int(step.get("timeoutMs") or step.get("timeout_ms") or 5000)
+                el = find_element(driver, step, timeout_ms=timeout_ms, logs_out=logs)
                 el.click()
-                logs.append("click")
+                logs.append("click ok")
             elif action == "input":
-                el = find_element(driver, step)
+                by, value = _get_locator(step)
+                logs.append(f"input {by}={value}")
+                timeout_ms = int(step.get("timeoutMs") or step.get("timeout_ms") or 5000)
+                el = find_element(driver, step, timeout_ms=timeout_ms, logs_out=logs)
                 if step.get("clear", True):
                     el.clear()
                 el.send_keys(step.get("text") or "")
-                logs.append("input")
+                logs.append("input ok")
             elif action == "wait":
                 ms = int(step.get("ms") or 1000)
-                wait_element(driver, step, ms)
-                logs.append(f"wait {ms}")
+                v = step.get("value") or step.get("selector") or step.get("xpath")
+                if v is None or str(v).strip() == "":
+                    logs.append(f"wait {ms}")
+                    wait_element(driver, step, ms, logs_out=logs)
+                else:
+                    by, value = _get_locator(step)
+                    logs.append(f"wait {by}={value} {ms}")
+                    wait_element(driver, step, ms, logs_out=logs)
+                    logs.append("wait ok")
             elif action == "back":
                 driver.back()
                 logs.append("back")
@@ -378,6 +578,9 @@ def run_app(content: Dict[str, Any]) -> Dict[str, Any]:
                 if hasattr(driver, "launch_app"):
                     driver.launch_app()
                 logs.append("launch")
+                ctx1 = _current_context(driver)
+                if ctx1:
+                    logs.append(f"ctx {ctx1}")
             elif action == "close":
                 if hasattr(driver, "close_app"):
                     driver.close_app()
@@ -387,8 +590,11 @@ def run_app(content: Dict[str, Any]) -> Dict[str, Any]:
                 driver.get_screenshot_as_file(path)
                 logs.append(f"screenshot {path}")
             elif action == "assert_exists":
-                find_element(driver, step)
-                logs.append("assert_exists")
+                by, value = _get_locator(step)
+                logs.append(f"assert_exists {by}={value}")
+                timeout_ms = int(step.get("timeoutMs") or step.get("timeout_ms") or 5000)
+                find_element(driver, step, timeout_ms=timeout_ms, logs_out=logs)
+                logs.append("assert_exists ok")
             else:
                 raise ValueError(f"unsupported action: {action}")
         duration = int((time.time() - start) * 1000)
@@ -396,6 +602,10 @@ def run_app(content: Dict[str, Any]) -> Dict[str, Any]:
         return success(result)
     except Exception as e:
         duration = int((time.time() - start) * 1000)
+        try:
+            logs.append(f"[ERROR] {str(e)}")
+        except Exception:
+            pass
         return failed(str(e), {"durationMs": duration, "logs": "\n".join(logs)})
     finally:
         if driver is not None:

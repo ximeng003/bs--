@@ -16,6 +16,7 @@ const route = useRoute()
 
 interface ExecutionRecord {
   id: string;
+  sourceId?: string;
   planName: string;
   type: 'plan' | 'single';
   status: 'success' | 'failed' | 'running' | 'pending';
@@ -30,6 +31,7 @@ interface ExecutionRecord {
   executor: string;
   caseType?: string;
   source?: string;
+  triggerType?: string;
   webhookStatus?: string;
 }
 
@@ -136,7 +138,8 @@ const fetchReports = async (skipDateValidation = false) => {
             executions.value = records.map((r: any) => {
                 const idStr = String(r.id)
                 const caseIdKey = r.caseId != null ? String(r.caseId) : ''
-                const isPlan = !!r.planId
+                // Robust Plan detection: must have planId AND NO caseId (due to aggregation)
+                const isPlan = !!r.planId && !r.caseId
                 const caseInfo = caseIdKey ? caseInfoMap[caseIdKey] : undefined
                 const caseNameFromBackend = r.caseName && String(r.caseName).trim().length > 0 ? String(r.caseName) : ''
                 const caseNameFromApi = !isPlan && caseInfo && caseInfo.name && String(caseInfo.name).trim().length > 0
@@ -146,7 +149,7 @@ const fetchReports = async (skipDateValidation = false) => {
                   isPlan
                     ? (r.planName || `测试计划 #${r.planId}`)
                     : (caseNameFromBackend || caseNameFromApi || `测试用例 #${r.caseId}`)
-                const caseTypeRaw = r.caseType || (caseInfo && caseInfo.type) || ''
+                const caseTypeRaw = isPlan ? 'PLAN' : (r.caseType || (caseInfo && caseInfo.type) || '')
                 const caseType = String(caseTypeRaw || '').toUpperCase()
                 const executedAt = r.executedAt || r.executed_at || (caseInfo && caseInfo.lastRun) || r.lastRun || ''
                 const executedBy = r.executedBy || r.executed_by || 'System'
@@ -162,18 +165,23 @@ const fetchReports = async (skipDateValidation = false) => {
       }
     }
                 const webhookStatus = r.webhookStatus || 'none'
+                const total = isPlan ? (r.totalCases || 0) : 1
+                const passed = isPlan ? (r.passedCases || 0) : (r.status === 'success' ? 1 : 0)
+                const failed = isPlan ? (r.failedCases || 0) : (r.status === 'failed' ? 1 : 0)
 
                 return {
                     id: idStr,
+                    sourceId: isPlan ? String(r.planId) : String(r.caseId),
                     planName,
                     type: isPlan ? 'plan' : 'single',
                     status: r.status,
                     startTime: executedAt ? String(executedAt).replace('T', ' ') : '',
                     duration: typeof r.executionTime === 'number' && r.executionTime >= 0 ? `${r.executionTime}ms` : '-',
-                    totalCases: 1,
-                    passedCases: r.status === 'success' ? 1 : 0,
-                    failedCases: r.status === 'failed' ? 1 : 0,
-                    engine: 'Server',
+                    totalCases: total,
+                    passedCases: passed,
+                    failedCases: failed,
+                    engine: 'Server', 
+                    triggerType: r.triggerType || 'manual',
                     environment: r.environment || '未设置',
                     executor: executedBy,
                     caseType: caseType || '未知类型',
@@ -344,8 +352,12 @@ const getStatusIcon = (status: string) => {
   }
 }
 
-const handleViewReport = (id: string) => {
-    router.push({ path: `/reports/${id}`, query: { from: 'reports' } })
+const handleViewReport = (record: ExecutionRecord) => {
+    if (record.type === 'plan') {
+        router.push({ path: '/plan-reports', query: { planId: record.sourceId, key: record.id } })
+    } else {
+        router.push({ path: `/reports/${record.id}`, query: { from: 'reports' } })
+    }
 }
 
 const getCaseTypeBadgeClass = (type: string) => {
@@ -353,7 +365,8 @@ const getCaseTypeBadgeClass = (type: string) => {
   const colors: Record<string, string> = {
     API: 'bg-blue-100 text-blue-800 border-blue-200',
     WEB: 'bg-purple-100 text-purple-800 border-purple-200',
-    APP: 'bg-green-100 text-green-800 border-green-200'
+    APP: 'bg-green-100 text-green-800 border-green-200',
+    PLAN: 'bg-indigo-100 text-indigo-800 border-indigo-200'
   }
   return colors[upper] || 'bg-gray-50 text-gray-600 border-gray-200'
 }
@@ -525,7 +538,7 @@ const getCaseTypeBadgeClass = (type: string) => {
           </div>
 
           <div class="flex justify-end mt-4 pt-4 border-t border-gray-100">
-            <Button variant="outline" size="sm" @click="handleViewReport(record.id)">
+            <Button variant="outline" size="sm" @click="handleViewReport(record)">
               <Eye class="w-4 h-4 mr-2" />
               查看报告
             </Button>

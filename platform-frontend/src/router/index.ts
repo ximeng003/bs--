@@ -92,14 +92,37 @@ const router = createRouter({
   routes
 })
 
+const resolveTokenFromStorage = () => {
+  const userStr = localStorage.getItem('user')
+  if (userStr) {
+    try {
+      const parsed = JSON.parse(userStr)
+      const data = parsed?.data || parsed
+      if (data?.token) return data.token
+      if (data?.user?.token) return data.user.token
+      if (parsed?.token) return parsed.token
+      if (parsed?.user?.token) return parsed.user.token
+      if (data?.accessToken) return data.accessToken
+      if (parsed?.accessToken) return parsed.accessToken
+    } catch {
+      localStorage.removeItem('user')
+    }
+  }
+  return localStorage.getItem('token') || localStorage.getItem('accessToken')
+}
+
 router.beforeEach((to, from, next) => {
   void from
-  const userStr = localStorage.getItem('user')
-  const user = userStr ? JSON.parse(userStr) : null
+  const user = localStorage.getItem('user')
+  const token = resolveTokenFromStorage()
   
-  if (to.meta.requiresAuth && !user) {
+  if (to.meta.requiresAuth && (!user || !token)) {
+    localStorage.removeItem('user')
+    localStorage.removeItem('token')
+    localStorage.removeItem('accessToken')
     next('/login')
   } else {
+    sessionStorage.removeItem('auth_redirecting')
     next()
   }
 })

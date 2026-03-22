@@ -5,7 +5,8 @@ import { Card, CardContent } from '@/components/ui/card'
 import Button from '@/components/ui/button/Button.vue'
 import Input from '@/components/ui/input/Input.vue'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Play, Save, Copy, Code } from 'lucide-vue-next'
+import Switch from '@/components/ui/switch/Switch.vue'
+import { Play, Save, Copy, Code, Square, Loader2 } from 'lucide-vue-next'
 import request from '@/api/request'
 import { showToast } from '@/lib/notify'
 
@@ -15,6 +16,9 @@ const caseId = ref<string | null>(null)
 const caseName = ref('Web首页功能测试')
 const deviceType = ref('web')
 const selfHealingEnabled = ref(true)
+const headedEnabled = ref(false)
+const environment = ref('dev')
+const saveError = ref('')
 const existingDescription = ref<string | null>(null)
 const isExecuting = ref(false)
 const executionLogs = ref<string[]>([])
@@ -108,6 +112,7 @@ const loadCase = async (id: string) => {
             caseName.value = res.name
             deviceType.value = res.type === 'APP' ? 'app' : 'web'
             existingDescription.value = res.description || null
+            environment.value = res.environment || 'dev'
             const raw = res.content || ''
             const formatSelector = (s: any) => {
                 if (!s) {
@@ -135,6 +140,12 @@ const loadCase = async (id: string) => {
                         appPackage: obj.appium.capabilities?.appPackage || '',
                         appActivity: obj.appium.capabilities?.appActivity || ''
                     }
+                }
+                if (typeof obj.headless === 'boolean') {
+                    headedEnabled.value = obj.headless === false
+                }
+                if (typeof obj.selfHealing === 'boolean') {
+                    selfHealingEnabled.value = obj.selfHealing
                 }
                 if (obj.script) {
                     scriptContent.value = obj.script
@@ -190,6 +201,11 @@ const parseSelector = (raw: string) => {
     if (value.startsWith('accessibility-id=')) {
         return { by: 'accessibility_id', value: value.replace('accessibility-id=', '') }
     }
+    if (value.startsWith('textContains=')) {
+        const t = value.replace('textContains=', '')
+        const esc = t.replace(/'/g, "\\'")
+        return { by: 'xpath', value: `//*[contains(@text,'${esc}') or contains(@content-desc,'${esc}')]` }
+    }
     if (value.startsWith('xpath=')) {
         return { by: 'xpath', value: value.replace('xpath=', '') }
     }
@@ -204,11 +220,12 @@ const parseScriptToSteps = (text: string) => {
     const lines = (text || '').split('\n').map(l => l.trim()).filter(Boolean)
     const steps: any[] = []
     for (const line of lines) {
-        if (line.startsWith('//') || line.startsWith('#')) {
+        const norm = line.replace(/：/g, ':')
+        if (norm.startsWith('//') || norm.startsWith('#')) {
             continue
         }
-        if (line.startsWith('点击元素:') || line.startsWith('点击按钮:')) {
-            const raw = line.split(':')[1]?.trim() || ''
+        if (norm.startsWith('点击元素:') || norm.startsWith('点击按钮:')) {
+            const raw = norm.split(':')[1]?.trim() || ''
             const partsAll = raw.split('|').map(p => p.trim()).filter(Boolean)
             const primary = partsAll[0] || ''
             const selector = parseSelector(primary)
@@ -221,8 +238,8 @@ const parseScriptToSteps = (text: string) => {
             const step: any = { action: 'click', ...selector }
             if (fallbacks.length) step.fallbacks = fallbacks
             steps.push(step)
-        } else if (line.startsWith('输入文本:')) {
-            const payload = line.split(':')[1] || ''
+        } else if (norm.startsWith('输入文本:')) {
+            const payload = norm.split(':')[1] || ''
             const firstComma = payload.indexOf(',')
             const selectorRaw = firstComma >= 0 ? payload.slice(0, firstComma).trim() : payload.trim()
             const textPart = firstComma >= 0 ? payload.slice(firstComma + 1).trim() : ''
@@ -238,8 +255,8 @@ const parseScriptToSteps = (text: string) => {
             const step: any = { action: 'input', ...selector, text: textPart || '', clear: true }
             if (fallbacks.length) step.fallbacks = fallbacks
             steps.push(step)
-        } else if (line.startsWith('等待元素:')) {
-            const payload = line.split(':')[1] || ''
+        } else if (norm.startsWith('等待元素:')) {
+            const payload = norm.split(':')[1] || ''
             const firstComma = payload.indexOf(',')
             const selectorRaw = firstComma >= 0 ? payload.slice(0, firstComma).trim() : payload.trim()
             const msStr = firstComma >= 0 ? payload.slice(firstComma + 1).trim() : '1000'
@@ -255,22 +272,22 @@ const parseScriptToSteps = (text: string) => {
             const step: any = { action: 'wait', ...selector, ms: isNaN(parseInt(msStr)) ? 1000 : parseInt(msStr) }
             if (fallbacks.length) step.fallbacks = fallbacks
             steps.push(step)
-        } else if (line.startsWith('等待时间:')) {
-            const msStr = line.split(':')[1] || '1000'
+        } else if (norm.startsWith('等待时间:')) {
+            const msStr = norm.split(':')[1] || '1000'
             const ms = parseInt(msStr)
             steps.push({ action: 'wait', ms: isNaN(ms) ? 1000 : ms })
-        } else if (line.startsWith('后退')) {
+        } else if (norm.startsWith('后退')) {
             steps.push({ action: 'back' })
-        } else if (line.startsWith('启动应用')) {
+        } else if (norm.startsWith('启动应用')) {
             steps.push({ action: 'launch' })
-        } else if (line.startsWith('关闭应用')) {
+        } else if (norm.startsWith('关闭应用')) {
             steps.push({ action: 'close' })
-        } else if (line.startsWith('断言元素存在:')) {
-            const value = line.split(':')[1]?.trim() || ''
+        } else if (norm.startsWith('断言元素存在:')) {
+            const value = norm.split(':')[1]?.trim() || ''
             const selector = parseSelector(value)
             steps.push({ action: 'assert_exists', ...selector })
-        } else if (line.startsWith('截图:')) {
-            const value = line.split(':')[1]?.trim() || 'screenshot.png'
+        } else if (norm.startsWith('截图:')) {
+            const value = norm.split(':')[1]?.trim() || 'screenshot.png'
             steps.push({ action: 'screenshot', path: value })
         }
     }
@@ -278,11 +295,12 @@ const parseScriptToSteps = (text: string) => {
 }
 
 const handleSave = async () => {
+    saveError.value = ''
     try {
         const descRaw = existingDescription.value ? existingDescription.value.trim() : ''
         const descClean = descRaw === 'Updated from Script Editor' ? '' : descRaw
     const contentObj = deviceType.value === 'web'
-        ? { language: 'python', script: scriptContent.value, selfHealing: selfHealingEnabled.value }
+        ? { language: 'python', script: scriptContent.value, selfHealing: selfHealingEnabled.value, headless: !headedEnabled.value }
             : {
                 appium: {
                     remoteUrl: appiumConf.value.remoteUrl,
@@ -298,11 +316,12 @@ const handleSave = async () => {
                 selfHealing: selfHealingEnabled.value
             }
         const payload = {
-            id: caseId.value,
+            id: caseId.value ? Number(caseId.value) : null,
             name: caseName.value,
             type: deviceType.value.toUpperCase(),
             content: JSON.stringify(contentObj),
             description: descClean,
+            environment: environment.value,
             status: 'active'
         }
         
@@ -319,8 +338,15 @@ const handleSave = async () => {
             }
         }
         showToast('保存成功', 'success')
-    } catch (_e) {
-        showToast('保存失败', 'error')
+        if (caseId.value) {
+            await loadCase(caseId.value)
+        }
+    } catch (e: any) {
+        const respData = e?.response?.data
+        const backendMsg = typeof respData === 'string' ? respData : respData?.message
+        const msg = e?.message || backendMsg || '保存失败'
+        saveError.value = msg
+        showToast(msg, 'error')
     }
 }
 
@@ -384,6 +410,10 @@ const handleExecute = async () => {
     showToast('请先保存用例', 'warning')
     return
   }
+  
+  // 自动保存当前配置，确保执行的是最新状态
+  await handleSave()
+  
   isExecuting.value = true
   executionLogs.value = []
   try {
@@ -395,6 +425,17 @@ const handleExecute = async () => {
     showToast(e?.message || '执行失败', 'error')
   } finally {
     isExecuting.value = false
+  }
+}
+
+const handleStop = async () => {
+  if (!caseId.value) return
+  try {
+    await request.post(`/testcases/${caseId.value}/stop`)
+    showToast('停止成功！', 'success')
+    isExecuting.value = false
+  } catch (e) {
+    showToast('停止失败', 'error')
   }
 }
 
@@ -429,15 +470,26 @@ const handleCopyCode = () => {
           <div class="space-y-1 w-40">
             <div class="text-xs text-gray-500">自愈</div>
             <div class="flex items-center gap-2">
-              <Switch v-model:checked="selfHealingEnabled" />
+              <Switch v-model="selfHealingEnabled" />
               <span class="text-xs text-gray-600">{{ selfHealingEnabled ? '启用' : '关闭' }}</span>
+            </div>
+          </div>
+          <div v-if="deviceType === 'web'" class="space-y-1 w-40">
+            <div class="text-xs text-gray-500">可视化</div>
+            <div class="flex items-center gap-2">
+              <Switch v-model="headedEnabled" />
+              <span class="text-xs text-gray-600">{{ headedEnabled ? '开启' : '关闭' }}</span>
             </div>
           </div>
         </div>
         <div class="flex items-center gap-2">
-          <Button :disabled="isExecuting" @click="handleExecute">
+          <Button v-if="isExecuting" variant="destructive" @click="handleStop">
+            <Square class="w-4 h-4 mr-2" />
+            停止
+          </Button>
+          <Button v-else @click="handleExecute">
             <Play class="w-4 h-4 mr-2" />
-            {{ isExecuting ? '执行中...' : '执行' }}
+            执行
           </Button>
           <Button variant="outline" @click="handleSave">
             <Save class="w-4 h-4 mr-2" />
@@ -446,6 +498,7 @@ const handleCopyCode = () => {
         </div>
       </CardContent>
     </Card>
+    <div v-if="saveError" class="text-xs text-red-600 px-4 -mt-2">{{ saveError }}</div>
 
     <div class="flex-1 flex gap-4 min-h-0">
       <!-- Keywords Sidebar -->

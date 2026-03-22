@@ -63,6 +63,15 @@ public class TestReport implements Serializable {
     @TableField(exist = false)
     private String caseType;
 
+    @TableField(exist = false)
+    private Integer totalCases;
+
+    @TableField(exist = false)
+    private Integer passedCases;
+
+    @TableField(exist = false)
+    private Integer failedCases;
+
     @TableField("is_deleted")
     private Boolean isDeleted;
 

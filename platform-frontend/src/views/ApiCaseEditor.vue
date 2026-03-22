@@ -289,11 +289,21 @@ const handleSend = async () => {
       // Global Variables Substitution
       allVars.forEach((v: any) => {
         if (v.key && v.value) {
-          // Support both {{KEY}} and $(KEY) syntax
-          result = result.replace(new RegExp(`\\{\\{\\s*${v.key}\\s*\\}\\}`, 'g'), v.value)
-          result = result.replace(new RegExp(`\\$\\(\\s*${v.key}\\s*\\)`, 'g'), v.value)
+          // Support multiple formats: {{key}}, {{ key }}, $(key), $( key )
+          const escapedKey = v.key.replace(/[.*+?^${}()|[\\\]]/g, '\\$&')
+          result = result.replace(new RegExp(`\\{\\{\\s*${escapedKey}\\s*\\}\\b`, 'g'), v.value)
+          result = result.replace(new RegExp(`\\$\\(\\s*${escapedKey}\\s*\\)`, 'g'), v.value)
         }
       })
+
+      // Environment Variables (baseUrl) from localStorage
+      const baseUrl = localStorage.getItem('baseUrl')
+      if (baseUrl) {
+        result = result.replace(/\{\{\s*baseUrl\s*\}\}/g, baseUrl)
+        result = result.replace(/\{\{\s*BASE_URL\s*\}\}/g, baseUrl)
+        result = result.replace(/\$\(\s*baseUrl\s*\)/g, baseUrl)
+        result = result.replace(/\$\(\s*BASE_URL\s*\)/g, baseUrl)
+      }
       
       // Random Functions Substitution
       // Support {{random.func()}} or $(random.func())
@@ -509,7 +519,7 @@ const removeAssertion = (index: number) => assertions.value.splice(index, 1)
     <Card class="border-gray-200">
       <CardContent class="pt-6">
         <Tabs default-value="params" class="w-full">
-          <TabsList class="grid w-full grid-cols-4 bg-gray-100">
+          <TabsList class="grid w-full grid-cols-5 bg-gray-100 mb-4">
             <TabsTrigger value="params">Params</TabsTrigger>
             <TabsTrigger value="headers">Headers</TabsTrigger>
             <TabsTrigger value="body">Body</TabsTrigger>
